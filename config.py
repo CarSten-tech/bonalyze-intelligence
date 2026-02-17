@@ -5,8 +5,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file='.env', env_file_encoding='utf-8', extra='ignore')
 
     # API Keys
-    MARKETGURU_API_KEY: str = "8Kk+pmbf7TgJ9nVj2cXeA7P5zBGv8iuutVVMRfOfvNE="
-    MARKETGURU_CLIENT_KEY: str = "WU/RH+PMGDi+gkZer3WbMelt6zcYHSTytNB7VpTia90="
+    MARKETGURU_API_KEY: str
+    MARKETGURU_CLIENT_KEY: str
     
     # Supabase
     SUPABASE_URL: str

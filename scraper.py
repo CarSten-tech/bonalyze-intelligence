@@ -89,56 +89,51 @@ class Scraper:
     def _parse_offer(self, item: Dict[str, Any], retailer: str) -> Optional[BonalyzeOffer]:
         """Parse a single offer item."""
         try:
-            # Pydantic parsing for validation (partial)
-            # We use a permissive model to extract what we need
+            # Pydantic parsing for validation (strict)
+            mg_offer = MarktguruOffer(**item)
             
-            # Basic validation
-            if not item.get("id"):
-                return None
-            
-            # Map to BonalyzeOffer
-            product = item.get("product", {})
-            name = product.get("name")
-            description = item.get("description") or product.get("description")
+            # Helper to access nested data safely from the model
+            product = mg_offer.product
+            name = product.name
+            description = mg_offer.description or product.description
             
             full_name = name
             if description and description not in [name, ""]:
                 full_name = f"{name} {description}"
 
-            price = item.get("price")
-            ref_price = item.get("referencePrice")
-            old_price = item.get("oldPrice")
+            price = mg_offer.price
+            ref_price = mg_offer.referencePrice
+            old_price = mg_offer.oldPrice
             
-            regular_price = ref_price if ref_price else (old_price if old_price else price)
+            regular_price = ref_price if ref_price is not None else (old_price if old_price is not None else price)
 
             valid_from = None
             valid_to = None
-            dates = item.get("validityDates", [])
-            if dates:
-                valid_from = dates[0].get("from")
-                valid_to = dates[0].get("to")
+            if mg_offer.validityDates:
+                valid_from = mg_offer.validityDates[0].from_
+                valid_to = mg_offer.validityDates[0].to
 
-            unit_data = item.get("unit", {})
-            unit = unit_data.get("shortName")
-            amount = item.get("quantity")
+            unit = None
+            if mg_offer.unit:
+                unit = mg_offer.unit.shortName
+            amount = mg_offer.quantity
 
             image_url = None
-            offer_id = item.get("id")
-            if offer_id:
-                image_url = f"https://mg2de.b-cdn.net/api/v1/offers/{offer_id}/images/default/0/medium.webp"
+            if mg_offer.id:
+                image_url = f"https://mg2de.b-cdn.net/api/v1/offers/{mg_offer.id}/images/default/0/medium.webp"
 
             return BonalyzeOffer(
                 retailer=retailer,
                 product_name=full_name,
-                price=float(price) if price is not None else 0.0,
-                regular_price=float(regular_price) if regular_price is not None else 0.0,
+                price=float(price),
+                regular_price=float(regular_price),
                 unit=unit,
                 amount=amount,
                 currency="EUR",
                 valid_from=valid_from,
                 valid_to=valid_to,
                 image_url=image_url,
-                offer_id=str(offer_id),
+                offer_id=str(mg_offer.id),
                 raw_data=item
             )
 

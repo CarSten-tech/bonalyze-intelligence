@@ -38,6 +38,11 @@ def main():
             logger.info("Initializing Embedder and DataSync...")
             embedder = Embedder()
             data_sync = DataSync()
+            
+            # Prune expired offers before processing
+            logger.info("Pruning expired offers...")
+            data_sync.delete_expired_offers()
+            
         except Exception as e:
             logger.error(f"Initialization Error: {e}")
             return

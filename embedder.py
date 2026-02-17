@@ -1,4 +1,5 @@
 import os
+import logging
 from google import genai
 from supabase import create_client, Client
 from dotenv import load_dotenv
@@ -7,6 +8,8 @@ from typing import List, Dict
 import time
 
 from config import settings
+
+logger = logging.getLogger(__name__)
 
 class Embedder:
     def __init__(self):
@@ -24,15 +27,9 @@ class Embedder:
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     def _generate_embeddings_api(self, texts: List[str]) -> List[List[float]]:
-        """Call Gemini API with retry logic."""
+        """Call Gemini API with retry logic using true batching."""
         if not texts:
             return []
-        
-        # Gemini often supports batching. If not, we might need loop here.
-        # Assuming google-genai supports list of contents.
-        # If the library expects a single string or list, we need to check docs.
-        # For now, let's assume we might need to iterate if batching isn't straightforward or to be safe.
-        # Actually newer Vertex/Gemini APIs support batch.
         
         embeddings = []
         # Batching explicitly to avoid hitting size limits if any
@@ -40,19 +37,28 @@ class Embedder:
         
         for i in range(0, len(texts), BATCH_SIZE):
             batch = texts[i:i+BATCH_SIZE]
-            result = self.client.models.embed_content(
-                model=self.model,
-                contents=batch,
-                config={'title': "Product Embedding"} 
-            )
-            # Result structure depends on library version. 
-            # If batch, result.embeddings should be a list.
-            if result.embeddings:
-                for emb in result.embeddings:
-                    embeddings.append(emb.values)
-            else:
-                # Fallback or error
-                raise ValueError("No embeddings returned from API")
+            
+            # Optimize: pass the list 'batch' directly to 'contents'
+            # Gemini Python SDK supports list of strings for 'contents'
+            try:
+                result = self.client.models.embed_content(
+                    model=self.model,
+                    contents=batch,
+                    config={'title': "Product Embedding"} 
+                )
+                
+                # Check structure. If input was list, 'embeddings' should be list of Embedding objects
+                if result.embeddings:
+                    for emb in result.embeddings:
+                        embeddings.append(emb.values)
+                else:
+                     raise ValueError("No embeddings returned from API")
+                     
+            except Exception as e:
+                 # Be specific about logging
+                 logger.error(f"Gemini API Error: {e}") 
+                 # Re-raise for tenacity
+                 raise e
                 
         return embeddings
 
@@ -72,11 +78,7 @@ class Embedder:
         
         # 1. Check Cache
         try:
-            # Chunking for Supabase 'in_' query if list is huge
-            # Supabase URL length limit safeguard
             unique_texts = list(set(texts))
-            
-            # Simple chunking for cache lookup
             CACHE_LOOKUP_CHUNK = 200
             for i in range(0, len(unique_texts), CACHE_LOOKUP_CHUNK):
                 chunk = unique_texts[i:i+CACHE_LOOKUP_CHUNK]
@@ -87,9 +89,7 @@ class Embedder:
                         results[row["name"]] = row["embedding"]
 
         except Exception as e:
-            print(f"Embedder: Cache lookup error: {e}")
-            # Proceed to generate all if cache fails? Or just log.
-            # We'll treat all as missing if cache fails to be safe/resilient
+            logger.warning(f"Cache lookup error: {e}")
         
         # Identify missing
         for text in unique_texts:
@@ -99,7 +99,7 @@ class Embedder:
         if not missing_texts:
             return results
 
-        print(f"Embedder: Generating {len(missing_texts)} new embeddings...")
+        logger.info(f"Generating {len(missing_texts)} new embeddings...")
 
         # 2. Generate Missing
         try:
@@ -112,14 +112,12 @@ class Embedder:
                 upsert_data.append({"name": text, "embedding": emb})
             
             if upsert_data:
-                # Batch upsert
                 UPSERT_CHUNK = 100
                 for i in range(0, len(upsert_data), UPSERT_CHUNK):
                     self.supabase.table("product_embeddings_cache").upsert(upsert_data[i:i+UPSERT_CHUNK]).execute()
                     
         except Exception as e:
-            print(f"Embedder: Generation/Caching error: {e}")
-            # Start returning what we have?
+            logger.error(f"Generation/Caching error: {e}")
 
         return results
 

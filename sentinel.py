@@ -1,6 +1,12 @@
 import asyncio
+import logging
+import re
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
+
+# Logging setup
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 class Sentinel:
     def __init__(self, headless=True):
@@ -25,7 +31,7 @@ class Sentinel:
             # Listener for requests to capture headers
             async def handle_request(route, request):
                 if "marktguru" in request.url:
-                    print(f"DEBUG: Intercepted URL: {request.url}")
+                    logger.debug(f"Intercepted URL: {request.url}")
 
                 all_headers = request.headers
                 # Filter for relevant headers (x- or non-standard)
@@ -46,12 +52,18 @@ class Sentinel:
             try:
                 # Visit a specific retailer page to trigger relevant API calls
                 target_url = url if url != "https://www.marktguru.de" else "https://www.marktguru.de/angebote/kaufland"
-                print(f"Sentinel: Navigating to {target_url} to capture headers...")
+                logger.info(f"Navigating to {target_url} to capture headers...")
                 await page.goto(target_url, wait_until="networkidle")
-                # Wait a bit to ensure dynamic requests fire
-                await page.wait_for_timeout(5000) 
+                
+                # Refined wait: wait for the specific offers API request
+                try:
+                    await page.wait_for_request(re.compile(r'.*/api/v1/offers.*'), timeout=10000)
+                    logger.info("Captured offers API request.")
+                except Exception:
+                    logger.warning("Timeout waiting for offers API request, passing...")
+
             except Exception as e:
-                print(f"Sentinel Error during navigation: {e}")
+                logger.error(f"Error during navigation: {e}")
             finally:
                 await browser.close()
         
@@ -60,4 +72,4 @@ class Sentinel:
 if __name__ == "__main__":
     sentinel = Sentinel(headless=False) # Run headed to see what happens in debug
     headers = asyncio.run(sentinel.extract_headers())
-    print("Captured Headers:", headers)
+    logger.info(f"Captured Headers: {headers}")
