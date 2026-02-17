@@ -30,7 +30,20 @@ class DataSync:
         data_to_upsert = []
         for offer in offers:
             row = offer.model_dump(exclude={"raw_data"})
+            
+            # Map Python model fields to Database columns
             row["store"] = row.pop("retailer")
+            
+            # Schema corrections based on user feedback
+            if "valid_to" in row:
+                row["valid_until"] = row.pop("valid_to")
+            
+            if "unit" in row:
+                row["price_per_unit"] = row.pop("unit")
+                
+            if "amount" in row:
+                row["weight_volume"] = row.pop("amount")
+                
             data_to_upsert.append(row)
 
         if not data_to_upsert:
@@ -82,11 +95,11 @@ class DataSync:
 
     def delete_expired_offers(self):
         """
-        Deletes offers where valid_to is in the past.
+        Deletes offers where valid_until is in the past.
         """
         try:
             now = datetime.now().isoformat()
-            response = self.supabase.table("offers").delete().lt("valid_to", now).execute()
+            response = self.supabase.table("offers").delete().lt("valid_until", now).execute()
             
             count = len(response.data) if response.data else 0
             logger.info(f"DataSync: Pruned {count} expired offers (global).")
