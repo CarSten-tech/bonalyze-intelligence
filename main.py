@@ -1,12 +1,14 @@
 import os
+import asyncio
 import datetime
 import argparse
 import time
 import logging
-from typing import List, Dict
+from typing import List, Dict, Any
 
 # Local imports
 from scraper import Scraper
+from sentinel import Sentinel
 from config import settings
 from models import BonalyzeOffer
 
@@ -22,117 +24,134 @@ except ImportError:
     Embedder = None
     DataSync = None
 
-def main():
+async def main_async():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true", help="Run without DB/API writes")
     args = parser.parse_args()
 
-    logger.info(f"Starting Bonalyze Intelligence... (Dry Run: {args.dry_run})")
+    run_start_time = datetime.datetime.now()
+    logger.info(f"Starting Bonalyze Intelligence (Enterprise Run)... (Start: {run_start_time.isoformat()}, Dry Run: {args.dry_run})")
 
-    # 1. Initialize Components
+    # 1. Discovery Phase (Sentinel)
+    discovered_headers = {}
+    try:
+        logger.info("Discovery Phase: Launching Sentinel to capture dynamic headers...")
+        sentinel = Sentinel(headless=True)
+        discovered_headers = await sentinel.extract_headers()
+        logger.info(f"Discovery Phase: Captured {len(discovered_headers)} headers.")
+    except Exception as e:
+        logger.error(f"Discovery Phase Failed: {e}. Falling back to static configuration.")
+
+    # 2. Initialization Phase
     embedder = None
     data_sync = None
     
     if not args.dry_run:
         try:
-            logger.info("Initializing Embedder and DataSync...")
+            logger.info("Initialization Phase: Setting up Embedder and DataSync...")
             embedder = Embedder()
             data_sync = DataSync()
             
-            # Prune expired offers before processing
-            logger.info("Pruning expired offers...")
+            # Prune globally expired offers (pre-run sweep)
+            logger.info("Initialization Phase: Pruning globally expired offers...")
             data_sync.delete_expired_offers()
-            
         except Exception as e:
-            logger.error(f"Initialization Error: {e}")
+            logger.error(f"Initialization Phase Error: {e}")
             return
     else:
-        logger.info("Dry Run: Skipping Embedder/DataSync initialization.")
+        logger.info("Dry Run: Skipping secondary component initialization.")
 
-    # 2. Initialize Scraper
-    scraper = Scraper()
-
-    # 3. Define Stores to Scrape
-    stores = ["kaufland", "edeka", "aldi_sued", "lidl"] # Updated keys to match config/scraper 
+    # Initialize Scraper with discovered headers
+    scraper = Scraper(discovered_headers=discovered_headers)
+    scraper.load_retailer_configs()
     
-    total_stats = {"fetched": 0, "inserted": 0, "updated": 0, "failed": 0, "embedded": 0}
+    # 3. Execution Phase
+    stores = list(scraper.retailer_mapping.keys()) if scraper.retailer_mapping else ["kaufland", "edeka", "aldi_sued", "lidl"]
+    total_stats = {"fetched": 0, "inserted": 0, "failed": 0, "embedded": 0, "pruned": 0}
 
-    # 4. Scrape & Process
     for store in stores:
-        logger.info(f"--- Processing Store: {store} ---")
+        logger.info(f"--- Processing Retailer: {store} ---")
         
         try:
-            # Fetch offers 
+            # Mark: Fetch offers
             max_items = 10 if args.dry_run else None
             offers: List[BonalyzeOffer] = scraper.fetch_offers(store, max_items=max_items)
             
             count = len(offers)
             total_stats["fetched"] += count
-            logger.info(f"Scraper: Found {count} offers for {store}")
+            logger.info(f"Execution Phase: Found {count} active offers for {store}.")
 
             if count == 0:
+                # Still prune if 0 results (maybe they are all gone?)
+                # But usually safer to only prune if we actually got a successful response
                 continue
 
-            # Process in batches if necessary, but here we can just process all for the store
-            # or chunk if memory is concern. Let's process all for simplicity given typical volumes.
-            
-            # Extract texts for embedding
-            product_names = [o.product_name for o in offers]
-            
-            # Batch Embeddings
-            embeddings_map = {}
+            # Embedding (Batch)
             if embedder:
+                product_names = [o.product_name for o in offers]
                 try:
-                    logger.info(f"Generating embeddings for {len(product_names)} items...")
+                    logger.info(f"Embedding Phase: Generating embeddings for {len(product_names)} items...")
                     embeddings_map = embedder.get_embeddings_batch(product_names)
+                    
+                    # Assign to offers
+                    for o in offers:
+                        o.embedding = embeddings_map.get(o.product_name)
+                    
                     total_stats["embedded"] += len(embeddings_map)
                 except Exception as e:
-                    logger.error(f"Embedding batch failed: {e}")
-            
-            # Assign embeddings back to offers
-            for offer in offers:
-                if offer.product_name in embeddings_map:
-                    offer.embedding = embeddings_map[offer.product_name]
-                
-                # Dry run logging
-                if args.dry_run:
-                    logger.debug(f"[Dry Run] {offer.product_name}: {offer.price}€")
+                    logger.error(f"Embedding Phase Failed for {store}: {e}")
 
-            if args.dry_run:
-                logger.info(f"[Dry Run] Would sync {len(offers)} offers for {store}")
-                continue
-
-            # Batch Sync
-            if data_sync:
+            # Sync to Supabase
+            if not args.dry_run and data_sync:
                 try:
-                    logger.info(f"Syncing {len(offers)} offers to Supabase...")
-                    stats = data_sync.sync_offers_batch(offers)
-                    
-                    total_stats["inserted"] += stats.get("inserted", 0)
-                    total_stats["updated"] += stats.get("updated", 0)
-                    total_stats["failed"] += stats.get("failed", 0)
-                    
-                    logger.info(f"Sync Stats for {store}: {stats}")
-                except Exception as e:
-                    logger.error(f"Sync batch failed for {store}: {e}")
-                    total_stats["failed"] += len(offers)
+                    # Enforce consistent timestamp for Mark-and-Sweep
+                    # Assign the run_start_time to all offers in this batch
+                    for o in offers:
+                        o.scraped_at = run_start_time
 
-            # Rate limit between stores
+                    logger.info(f"Sync Phase: Upserting {len(offers)} offers for {store}...")
+                    sync_stats = data_sync.sync_offers_batch(offers)
+                    total_stats["inserted"] += sync_stats.get("inserted", 0)
+                    total_stats["failed"] += sync_stats.get("failed", 0)
+                    
+                    # Sweep: Mark-and-Sweep Pruning
+                    # Remove offers for this retailer that weren't in this successful run
+                    pruned_count = data_sync.prune_stale_offers(run_start_time, store)
+                    total_stats["pruned"] += pruned_count
+                    
+                    # Observability: Log total DB count
+                    total_db_count = data_sync.get_total_count()
+                    logger.info(f"Observability: Current DB Count: {total_db_count} offers")
+                    
+                except Exception as e:
+                    logger.error(f"Sync/Prune Phase Failed for {store}: {e}")
+                    total_stats["failed"] += len(offers)
+            else:
+                 logger.debug(f"[Dry Run] Skipping DB sync for {store}")
+
+            # Politeness
             time.sleep(1)
 
         except Exception as e:
-            logger.error(f"Error processing {store}: {e}")
+            logger.error(f"Processing Error for {store}: {e}")
 
-    # Final Summary
-    logger.info("="*30)
-    logger.info("BONALYZE INTELLIGENCE SUMMARY")
-    logger.info("="*30)
-    logger.info(f"Fetched:  {total_stats['fetched']}")
-    logger.info(f"Inserted: {total_stats['inserted']}") # In batch upsert, this wraps both inserts and updates roughly
-    logger.info(f"Updated:  {total_stats['updated']}") # Might be 0 if upsert response doesn't distinguish
-    logger.info(f"Failed:   {total_stats['failed']}")
-    logger.info(f"Embedded: {total_stats['embedded']}")
-    logger.info("="*30)
+    # 4. Summary Phase
+    run_end_time = datetime.datetime.now()
+    duration = (run_end_time - run_start_time).total_seconds()
+    
+    logger.info("="*50)
+    logger.info("FINAL ENTERPRISE RUN SUMMARY")
+    logger.info("="*50)
+    logger.info(f"Duration:  {duration:.2f} seconds")
+    logger.info(f"Fetched:   {total_stats['fetched']}")
+    logger.info(f"Upserted:  {total_stats['inserted']} (New/Updated)")
+    logger.info(f"Pruned:    {total_stats['pruned']} (Stale/Expired)")
+    logger.info(f"Embedded:  {total_stats['embedded']}")
+    logger.info(f"Failed:    {total_stats['failed']}")
+    logger.info("="*50)
+
+def main():
+    asyncio.run(main_async())
 
 if __name__ == "__main__":
     main()

@@ -20,8 +20,15 @@ class Sentinel:
         """
         # Use Stealth context manager
         async with Stealth().use_async(async_playwright()) as p:
-            # Launch chromium explicitly
-            browser = await p.chromium.launch(headless=self.headless)
+            # Launch chromium with stability flags for CI/Linux environments
+            browser = await p.chromium.launch(
+                headless=self.headless,
+                args=[
+                    "--disable-gpu",
+                    "--disable-dev-shm-usage",
+                    "--no-sandbox"
+                ]
+            )
             context = await browser.new_context()
             
             # Apply stealth
@@ -35,7 +42,6 @@ class Sentinel:
 
                 all_headers = request.headers
                 # Filter for relevant headers (x- or non-standard)
-                # This logic can be refined based on specific needs
                 for key, value in all_headers.items():
                     if key.lower().startswith("x-") or key.lower() not in [
                         "host", "connection", "sec-ch-ua", "sec-ch-ua-mobile",
@@ -55,12 +61,12 @@ class Sentinel:
                 logger.info(f"Navigating to {target_url} to capture headers...")
                 await page.goto(target_url, wait_until="networkidle")
                 
-                # Refined wait: wait for the specific offers API request
+                # Refined wait: longer timeout (30s) and specific request trigger
                 try:
-                    await page.wait_for_request(re.compile(r'.*/api/v1/offers.*'), timeout=10000)
-                    logger.info("Captured offers API request.")
+                    await page.wait_for_request(re.compile(r'.*/api/v1/offers.*'), timeout=30000)
+                    logger.info("Captured offers API request successfully.")
                 except Exception:
-                    logger.warning("Timeout waiting for offers API request, passing...")
+                    logger.warning("Timeout waiting for offers API request (30s), continuing with captured headers so far...")
 
             except Exception as e:
                 logger.error(f"Error during navigation: {e}")

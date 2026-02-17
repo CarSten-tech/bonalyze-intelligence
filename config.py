@@ -4,9 +4,9 @@ from typing import Dict, Optional
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file='.env', env_file_encoding='utf-8', extra='ignore')
 
-    # API Keys
-    MARKETGURU_API_KEY: str
-    MARKETGURU_CLIENT_KEY: str
+    # API Keys (Optional fallbacks, Sentinel discovers them dynamically)
+    MARKETGURU_API_KEY: Optional[str] = None
+    MARKETGURU_CLIENT_KEY: Optional[str] = None
     
     # Supabase
     SUPABASE_URL: str
@@ -22,12 +22,4 @@ class Settings(BaseSettings):
     MAX_RETRIES: int = 3
     RETRY_DELAY: int = 1
     
-    # Retailer Mapping
-    RETAILER_IDS: Dict[str, str] = {
-        "kaufland": "126654",
-        "aldi_sued": "127153",
-        "edeka": "126699",
-        "lidl": "126679"
-    }
-
 settings = Settings()

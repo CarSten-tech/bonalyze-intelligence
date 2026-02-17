@@ -48,6 +48,38 @@ class DataSync:
 
         return stats
 
+    def prune_stale_offers(self, run_timestamp: datetime, retailer: str) -> int:
+        """
+        Deletes offers for a specific retailer that were NOT scraped in the current run.
+        This is the 'Sweep' phase of Mark-and-Sweep.
+        """
+        try:
+            timestamp_str = run_timestamp.isoformat()
+            logger.info(f"DataSync: Pruning stale offers for {retailer} (not seen since {timestamp_str})...")
+            
+            # Delete where retailer matches AND scraped_at < run_timestamp
+            response = self.supabase.table("offers").delete().eq("store", retailer).lt("scraped_at", timestamp_str).execute()
+            
+            count = len(response.data) if response.data else 0
+            logger.info(f"DataSync: Pruned {count} stale offers for {retailer}.")
+            return count
+            
+        except Exception as e:
+            logger.error(f"DataSync: Error pruning stale offers for {retailer}: {e}")
+            return 0
+
+    def get_total_count(self) -> int:
+        """
+        Returns the total number of offers in the database.
+        """
+        try:
+            # count='exact', head=True -> returns count without fetching data
+            response = self.supabase.table("offers").select("*", count="exact", head=True).execute()
+            return response.count if response.count is not None else 0
+        except Exception as e:
+            logger.error(f"DataSync: Error getting total count: {e}")
+            return 0
+
     def delete_expired_offers(self):
         """
         Deletes offers where valid_to is in the past.
@@ -57,10 +89,10 @@ class DataSync:
             response = self.supabase.table("offers").delete().lt("valid_to", now).execute()
             
             count = len(response.data) if response.data else 0
-            logger.info(f"Pruned {count} expired offers.")
+            logger.info(f"DataSync: Pruned {count} expired offers (global).")
             
         except Exception as e:
-            logger.error(f"Error pruning expired offers: {e}")
+            logger.error(f"DataSync: Error pruning expired offers: {e}")
 
     def sync_offer(self, offer: dict):
         """Legacy wrapper"""

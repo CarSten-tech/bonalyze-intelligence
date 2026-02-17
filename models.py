@@ -29,7 +29,7 @@ class MarktguruOffer(BaseModel):
     oldPrice: Optional[float] = None
     referencePrice: Optional[float] = None
     description: Optional[str] = None
-    quantity: Optional[str] = None
+    quantity: Optional[Any] = None
     unit: Optional[MarktguruOfferUnit] = None
     validityDates: List[MarktguruValidityDate] = []
     images: Optional[dict] = None # Metadata about images
@@ -40,7 +40,7 @@ class BonalyzeOffer(BaseModel):
     price: float
     regular_price: float
     unit: Optional[str] = None
-    amount: Optional[str] = None
+    amount: Optional[Any] = None
     currency: str = "EUR"
     valid_from: Optional[datetime] = None
     valid_to: Optional[datetime] = None

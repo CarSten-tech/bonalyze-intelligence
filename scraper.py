@@ -8,20 +8,52 @@ from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_t
 from config import settings
 from models import BonalyzeOffer, MarktguruOffer, OfferImage
 
+from supabase import create_client, Client
+
 # Logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class Scraper:
-    def __init__(self):
+    def __init__(self, discovered_headers: Optional[Dict[str, str]] = None):
         self.session = requests.Session()
-        self.session.headers.update({
-            "x-apikey": settings.MARKETGURU_API_KEY,
-            "x-clientkey": settings.MARKETGURU_CLIENT_KEY,
+        
+        # Base headers
+        headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36",
             "Origin": "https://www.marktguru.de",
             "Referer": "https://www.marktguru.de/"
-        })
+        }
+        
+        # Merge discovered headers if available
+        if discovered_headers:
+            logger.info("Scraper: Applying discovered headers from Sentinel.")
+            headers.update(discovered_headers)
+        else:
+            logger.warning("Scraper: No discovered headers provided, using static config (fallback).")
+            headers.update({
+                "x-apikey": settings.MARKETGURU_API_KEY,
+                "x-clientkey": settings.MARKETGURU_CLIENT_KEY,
+            })
+            
+        self.session.headers.update(headers)
+        
+        # Initialize Supabase client for retailer configs
+        self.supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+        self.retailer_mapping: Dict[str, str] = {}
+
+    def load_retailer_configs(self):
+        """Load retailer mapping from Supabase."""
+        try:
+            logger.info("Scraper: Loading retailer configurations from Supabase...")
+            response = self.supabase.table("retailer_configs").select("retailer_key, retailer_id").eq("is_active", True).execute()
+            if response.data:
+                self.retailer_mapping = {row["retailer_key"]: row["retailer_id"] for row in response.data}
+                logger.info(f"Scraper: Loaded {len(self.retailer_mapping)} retailer configs: {list(self.retailer_mapping.keys())}")
+            else:
+                logger.warning("Scraper: No active retailer configs found in Supabase.")
+        except Exception as e:
+            logger.error(f"Scraper: Failed to load retailer configs: {e}")
 
     @retry(stop=stop_after_attempt(settings.MAX_RETRIES), wait=wait_fixed(settings.RETRY_DELAY), retry=retry_if_exception_type(requests.RequestException))
     def _make_request(self, url: str, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -31,7 +63,10 @@ class Scraper:
 
     def fetch_offers(self, retailer_key: str, max_items: Optional[int] = None) -> List[BonalyzeOffer]:
         """Fetch all offers for a given retailer."""
-        retailer_id = settings.RETAILER_IDS.get(retailer_key.lower())
+        if not self.retailer_mapping:
+            self.load_retailer_configs()
+
+        retailer_id = self.retailer_mapping.get(retailer_key.lower())
         if not retailer_id:
             logger.error(f"Unknown retailer key: {retailer_key}")
             return []

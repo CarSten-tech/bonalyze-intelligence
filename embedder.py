@@ -27,40 +27,59 @@ class Embedder:
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     def _generate_embeddings_api(self, texts: List[str]) -> List[List[float]]:
-        """Call Gemini API with retry logic using true batching."""
+        """
+        Call Gemini API with retry logic using true batching.
+        Enhanced to handle partial failures by falling back to individual calls if batch fails.
+        """
         if not texts:
             return []
         
         embeddings = []
-        # Batching explicitly to avoid hitting size limits if any
         BATCH_SIZE = 100
         
         for i in range(0, len(texts), BATCH_SIZE):
             batch = texts[i:i+BATCH_SIZE]
             
-            # Optimize: pass the list 'batch' directly to 'contents'
-            # Gemini Python SDK supports list of strings for 'contents'
             try:
+                # Attempt batch embedding
                 result = self.client.models.embed_content(
                     model=self.model,
                     contents=batch,
                     config={'title': "Product Embedding"} 
                 )
                 
-                # Check structure. If input was list, 'embeddings' should be list of Embedding objects
                 if result.embeddings:
-                    for emb in result.embeddings:
-                        embeddings.append(emb.values)
+                    embeddings.extend([emb.values for emb in result.embeddings])
                 else:
-                     raise ValueError("No embeddings returned from API")
+                     logger.warning(f"Embedder: Batch {i//BATCH_SIZE} returned no embeddings. Attempting individual fallback.")
+                     embeddings.extend(self._generate_individual_fallback(batch))
                      
             except Exception as e:
-                 # Be specific about logging
-                 logger.error(f"Gemini API Error: {e}") 
-                 # Re-raise for tenacity
-                 raise e
+                logger.error(f"Embedder: Batch {i//BATCH_SIZE} failed: {e}. Attempting individual fallback.")
+                # If batch fails, try each text individually to save as many as possible
+                embeddings.extend(self._generate_individual_fallback(batch))
                 
         return embeddings
+
+    def _generate_individual_fallback(self, texts: List[str]) -> List[List[float]]:
+        """Fallback to generate embeddings one by one if batch fails."""
+        safe_embeddings = []
+        for text in texts:
+            try:
+                result = self.client.models.embed_content(
+                    model=self.model,
+                    contents=text,
+                    config={'title': "Product Embedding"}
+                )
+                if result.embeddings and len(result.embeddings) > 0:
+                    safe_embeddings.append(result.embeddings[0].values)
+                else:
+                    logger.error(f"Embedder: Could not generate embedding for text: {text[:50]}...")
+                    safe_embeddings.append([]) # Append empty to maintain index/zip alignment if needed, or handle upstream
+            except Exception as e:
+                logger.error(f"Embedder: Failed individual embedding for '{text[:50]}...': {e}")
+                safe_embeddings.append([])
+        return safe_embeddings
 
     def get_embeddings_batch(self, texts: List[str]) -> Dict[str, List[float]]:
         """
