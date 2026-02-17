@@ -21,5 +21,12 @@ class Settings(BaseSettings):
     DEFAULT_TIMEOUT: int = 10
     MAX_RETRIES: int = 3
     RETRY_DELAY: int = 1
+    SCRAPER_BATCH_SIZE: int = 50
+    
+    # Sentinel Config
+    SENTINEL_TIMEOUT: int = 30000
+    
+    # Embedder Config
+    EMBEDDING_BATCH_SIZE: int = 100
     
 settings = Settings()

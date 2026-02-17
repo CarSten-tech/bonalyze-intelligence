@@ -72,7 +72,7 @@ class Scraper:
             return []
 
         all_offers: List[BonalyzeOffer] = []
-        limit = 50
+        limit = settings.SCRAPER_BATCH_SIZE
         offset = 0
         total_results = None
 

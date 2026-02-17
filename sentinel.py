@@ -3,6 +3,7 @@ import logging
 import re
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
+from config import settings
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -63,10 +64,10 @@ class Sentinel:
                 
                 # Refined wait: longer timeout (30s) and specific request trigger
                 try:
-                    await page.wait_for_request(re.compile(r'.*/api/v1/offers.*'), timeout=30000)
+                    await page.wait_for_request(re.compile(r'.*/api/v1/offers.*'), timeout=settings.SENTINEL_TIMEOUT)
                     logger.info("Captured offers API request successfully.")
                 except Exception:
-                    logger.warning("Timeout waiting for offers API request (30s), continuing with captured headers so far...")
+                    logger.warning(f"Timeout waiting for offers API request ({settings.SENTINEL_TIMEOUT}ms), continuing with captured headers so far...")
 
             except Exception as e:
                 logger.error(f"Error during navigation: {e}")

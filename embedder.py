@@ -35,7 +35,7 @@ class Embedder:
             return []
         
         embeddings = []
-        BATCH_SIZE = 100
+        BATCH_SIZE = settings.EMBEDDING_BATCH_SIZE
         
         for i in range(0, len(texts), BATCH_SIZE):
             batch = texts[i:i+BATCH_SIZE]
