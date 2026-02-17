@@ -1,0 +1,25 @@
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment variables
+.env
+
+# Logs
+*.log
+probe_output.txt
+
+# Research / Temp artifacts
+*.html
+*.png
+api_test_offers.json
+
+# IDEs
+.vscode/
+.idea/
