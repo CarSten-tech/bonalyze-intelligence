@@ -134,12 +134,15 @@ class Embedder:
             upsert_data = []
             for text, emb in zip(missing_texts, new_embeddings):
                 results[text] = emb
-                upsert_data.append({"name": text, "embedding": emb})
+                if emb and len(emb) > 0: # Robustness: Only cache if we actually have dimensions
+                    upsert_data.append({"name": text, "embedding": emb})
             
             if upsert_data:
                 UPSERT_CHUNK = 100
                 for i in range(0, len(upsert_data), UPSERT_CHUNK):
                     self.supabase.table("product_embeddings_cache").upsert(upsert_data[i:i+UPSERT_CHUNK]).execute()
+            else:
+                logger.warning("Embedder: No valid embeddings were generated in this batch. Skipping cache upsert.")
                     
         except Exception as e:
             logger.error(f"Generation/Caching error: {e}")

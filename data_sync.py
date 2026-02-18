@@ -29,7 +29,7 @@ class DataSync:
         
         data_to_upsert = []
         for offer in offers:
-            row = offer.model_dump(exclude={"raw_data"})
+            row = offer.model_dump(mode='json', exclude={"raw_data"})
             
             # Map Python model fields to Database columns
             row["store"] = row.pop("retailer")
