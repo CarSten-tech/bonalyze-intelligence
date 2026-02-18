@@ -57,9 +57,13 @@ class Scraper:
 
     @retry(stop=stop_after_attempt(settings.MAX_RETRIES), wait=wait_fixed(settings.RETRY_DELAY), retry=retry_if_exception_type(requests.RequestException))
     def _make_request(self, url: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        response = self.session.get(url, params=params, timeout=settings.DEFAULT_TIMEOUT)
-        response.raise_for_status()
-        return response.json()
+        try:
+            response = self.session.get(url, params=params, timeout=settings.DEFAULT_TIMEOUT)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"HTTP Error for {url}: {e.response.status_code} - {e.response.text}")
+            raise e
 
     def fetch_offers(self, retailer_key: str, max_items: Optional[int] = None) -> List[BonalyzeOffer]:
         """Fetch all offers for a given retailer."""
@@ -77,16 +81,17 @@ class Scraper:
         total_results = None
         raw_count = 0
 
-        logger.info(f"Fetching offers for {retailer_key} (ID: {retailer_id})...")
+        target_count = 435 # Baseline expectation from Website analysis
+        logger.info(f"Using Publisher-API for {retailer_key}. Target: ~{target_count} items expected.")
 
         while True:
             # Check max_items
             if max_items and len(all_offers) >= max_items:
                 break
             try:
-                url = f"https://{settings.API_HOST}/api/v1/offers"
+                url = f"https://{settings.API_HOST}/api/v1/publishers/retailer/{retailer_key}/offers"
                 params = {
-                    "retailerIds": retailer_id,
+                    "as": "mobile",
                     "zipCode": settings.ZIP_CODE,
                     "limit": limit,
                     "offset": offset
@@ -96,7 +101,7 @@ class Scraper:
 
                 if total_results is None:
                     total_results = data.get("totalResults", 0)
-                    logger.info(f"Total results expected: {total_results}")
+                    logger.info(f"Total results available: {total_results}")
 
                 results = data.get("results", [])
                 if not results:
@@ -121,7 +126,7 @@ class Scraper:
                 logger.error(f"Error fetching offers at offset {offset}: {e}")
                 break
         
-        logger.info(f"Scraper Sanity Check ({retailer_key}): Raw: {raw_count} -> Filtered: {len(all_offers)}")
+        logger.info(f"Publisher-Mode active: Found {len(all_offers)} curated offers for {retailer_key}.")
         return all_offers
 
     def _parse_offer(self, item: Dict[str, Any], retailer: str) -> Optional[BonalyzeOffer]:
@@ -136,14 +141,8 @@ class Scraper:
             if not mg_offer.retailer or not mg_offer.retailer.indexOffer:
                 return None
                 
-            # 2. Price Check: Only keep discount items (oldPrice > price)
-            if mg_offer.oldPrice is None or mg_offer.oldPrice <= mg_offer.price:
-                return None
-                
-            # 3. Category Check: Only Food & Drugstore
-            ALLOWED_CATEGORIES = ["Lebensmittel & Getränke", "Drogerie & Kosmetik"]
-            if not mg_offer.category or mg_offer.category.name not in ALLOWED_CATEGORIES:
-                return None
+            # 2. Price Check: Removed as per Enterprise-Prompt (Trust curated endoint)
+            # 3. Category Check: Removed as per Enterprise-Prompt (Trust curated endpoint)
                 
             # 4. Time Check: Duration <= 14 days
             valid_from = None

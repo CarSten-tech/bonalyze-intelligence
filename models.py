@@ -35,7 +35,7 @@ class MarktguruOffer(BaseModel):
     id: int
     product: MarktguruProduct
     retailer: Optional[MarktguruRetailer] = None
-    category: Optional[MarktguruCategory] = None
+    category: Optional[Any] = None
     price: float
     oldPrice: Optional[float] = None
     referencePrice: Optional[float] = None
@@ -43,8 +43,8 @@ class MarktguruOffer(BaseModel):
     quantity: Optional[Any] = None
     unit: Optional[MarktguruOfferUnit] = None
     validityDates: List[MarktguruValidityDate] = []
-    validFrom: Optional[datetime] = None
-    validTo: Optional[datetime] = None
+    validFrom: Optional[datetime] = Field(None, alias="validFrom")
+    validTo: Optional[datetime] = Field(None, alias="validTo")
     images: Optional[dict] = None # Metadata about images
 
 class BonalyzeOffer(BaseModel):
