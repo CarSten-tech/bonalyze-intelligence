@@ -66,7 +66,8 @@ async def main_async():
     scraper.load_retailer_configs()
     
     # 3. Execution Phase
-    ALLOWED_STORES = ["kaufland", "edeka", "aldi-sued"]
+    logger.info("Enterprise Sync active: Using 768-dim Matryoshka Embeddings.")
+    ALLOWED_STORES = ["kaufland", "aldi-sued", "edeka"]
     stores = [s for s in scraper.retailer_mapping.keys() if s in ALLOWED_STORES] if scraper.retailer_mapping else ALLOWED_STORES
     total_stats = {"fetched": 0, "inserted": 0, "failed": 0, "embedded": 0, "pruned": 0}
 

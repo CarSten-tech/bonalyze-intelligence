@@ -131,7 +131,7 @@ class Scraper:
                 logger.error(f"Error fetching offers at offset {offset}: {e}")
                 break
         
-        logger.info(f"Publisher-Mode active: Found {len(all_offers)} curated offers for {retailer_key}.")
+        logger.info(f"Publisher-API: Received {len(all_offers)} curated items for {retailer_key}.")
         return all_offers
 
     def _parse_offer(self, item: Dict[str, Any], retailer: str) -> Optional[BonalyzeOffer]:

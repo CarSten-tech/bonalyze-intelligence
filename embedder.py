@@ -43,9 +43,9 @@ class Embedder:
             try:
                 # Attempt batch embedding
                 result = self.client.models.embed_content(
-                    model=f"models/{self.model}",
+                    model=self.model,
                     contents=batch,
-                    config={'title': "Product Embedding"} 
+                    config={'title': "Product Embedding", 'output_dimensionality': 768} 
                 )
                 
                 if result.embeddings:
@@ -73,9 +73,9 @@ class Embedder:
         for text in texts:
             try:
                 result = self.client.models.embed_content(
-                    model=f"models/{self.model}",
+                    model=self.model,
                     contents=text,
-                    config={'title': "Product Embedding"}
+                    config={'title': "Product Embedding", 'output_dimensionality': 768}
                 )
                 if result.embeddings and len(result.embeddings) > 0:
                     safe_embeddings.append(result.embeddings[0].values)
