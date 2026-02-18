@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 class Embedder:
     EMBEDDING_DIMENSION = 768
     MAX_SKIPPED_LOG_SAMPLES = 5
+    FALLBACK_EMBEDDING_MODEL = "gemini-embedding-001"
 
     def __init__(self):
         # Initialize Supabase
@@ -54,11 +55,7 @@ class Embedder:
     def _is_valid_embedding(self, values: List[float] | None) -> bool:
         return bool(values) and len(values) == self.EMBEDDING_DIMENSION
 
-    def _log_available_embedding_models_once(self) -> None:
-        if self._models_list_logged:
-            return
-        self._models_list_logged = True
-
+    def _list_embedding_capable_models(self) -> List[str]:
         try:
             models = self.client.models.list(config={"page_size": 100})
             embedding_models: List[str] = []
@@ -68,18 +65,42 @@ class Embedder:
                     name = getattr(m, "name", None)
                     if name:
                         embedding_models.append(name)
-
-            if embedding_models:
-                preview = ", ".join(embedding_models[:20])
-                logger.warning(
-                    f"Embedder diagnostics: embedding-capable models visible for current key/provider: {preview}"
-                )
-            else:
-                logger.warning(
-                    "Embedder diagnostics: no embedding-capable models returned by ListModels for current key/provider."
-                )
+            return embedding_models
         except Exception as e:
             logger.warning(f"Embedder diagnostics: ListModels failed: {e}")
+            return []
+
+    def _log_available_embedding_models_once(self) -> None:
+        if self._models_list_logged:
+            return
+        self._models_list_logged = True
+
+        embedding_models = self._list_embedding_capable_models()
+        if embedding_models:
+            preview = ", ".join(embedding_models[:20])
+            logger.warning(
+                f"Embedder diagnostics: embedding-capable models visible for current key/provider: {preview}"
+            )
+        else:
+            logger.warning(
+                "Embedder diagnostics: no embedding-capable models returned by ListModels for current key/provider."
+            )
+
+    def _switch_to_fallback_model_if_available(self) -> bool:
+        if self.model == self.FALLBACK_EMBEDDING_MODEL:
+            return False
+
+        embedding_models = self._list_embedding_capable_models()
+        normalized = {name.replace("models/", "") for name in embedding_models}
+        if self.FALLBACK_EMBEDDING_MODEL in normalized:
+            old_model = self.model
+            self.model = self.FALLBACK_EMBEDDING_MODEL
+            logger.warning(
+                f"Embedder: Switching model from '{old_model}' to '{self.model}' after 404."
+            )
+            return True
+
+        return False
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     def _generate_embeddings_api(self, texts: List[str]) -> List[List[float]]:
@@ -127,8 +148,48 @@ class Embedder:
                 if self._is_404_error(e):
                     logger.warning(
                         f"Embedder: Model not found (404) for batch {i//BATCH_SIZE} (model={self.model}, api={self.api_version}). "
-                        "Skipping all remaining embedding batches."
+                        "Trying fallback model if available."
                     )
+                    if self._switch_to_fallback_model_if_available():
+                        try:
+                            result = self.client.models.embed_content(
+                                model=self.model,
+                                contents=batch,
+                                config={"output_dimensionality": self.EMBEDDING_DIMENSION}
+                            )
+
+                            batch_embeddings = getattr(result, "embeddings", None)
+                            if not batch_embeddings or len(batch_embeddings) != len(batch):
+                                logger.warning(
+                                    f"Embedder: Fallback model returned empty/incomplete batch {i//BATCH_SIZE}. "
+                                    "Attempting individual fallback."
+                                )
+                                embeddings.extend(self._generate_individual_fallback(batch))
+                                continue
+
+                            for text, emb in zip(batch, batch_embeddings):
+                                values = getattr(emb, "values", None)
+                                if self._is_valid_embedding(values):
+                                    embeddings.append(values)
+                                else:
+                                    logger.warning(
+                                        f"Embedder: Invalid embedding dimension with fallback model for '{text[:50]}...'. "
+                                        "Attempting individual fallback."
+                                    )
+                                    embeddings.extend(self._generate_individual_fallback([text]))
+                            continue
+                        except Exception as fallback_error:
+                            if not self._is_404_error(fallback_error):
+                                logger.error(
+                                    f"Embedder: Fallback retry failed for batch {i//BATCH_SIZE}: {fallback_error}. "
+                                    "Attempting individual fallback."
+                                )
+                                embeddings.extend(self._generate_individual_fallback(batch))
+                                continue
+                            logger.warning(
+                                f"Embedder: Fallback model also returned 404 for batch {i//BATCH_SIZE}."
+                            )
+
                     self._log_available_embedding_models_once()
                     remaining_items = len(texts) - len(embeddings)
                     embeddings.extend([[] for _ in range(remaining_items)])

@@ -11,12 +11,14 @@ if not api_key:
     exit(1)
 
 api_version = os.environ.get("GEMINI_API_VERSION", "v1beta")
+embedding_model = os.environ.get("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
 client = genai.Client(api_key=api_key, http_options={"api_version": api_version})
 
 try:
     print("Using api_version:", api_version)
+    print("Using embedding model:", embedding_model)
     response = client.models.embed_content(
-        model="text-embedding-004",
+        model=embedding_model,
         contents="Hello world"
     )
     # Check response structure

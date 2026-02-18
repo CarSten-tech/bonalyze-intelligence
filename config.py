@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     SENTINEL_TIMEOUT: int = 120000
     
     # Embedder Config
-    GEMINI_EMBEDDING_MODEL: str = "text-embedding-004"
+    GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-001"
     EMBEDDING_BATCH_SIZE: int = 100
     
 settings = Settings()

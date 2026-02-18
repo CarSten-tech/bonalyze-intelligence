@@ -40,6 +40,7 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_API_VERSION: "v1beta"
+          GEMINI_EMBEDDING_MODEL: "gemini-embedding-001"
         run: |
           # Prüft, ob der manuelle Input "dry_run" aktiv ist
           if [ "${{ github.event.inputs.dry_run }}" == "true" ]; then
