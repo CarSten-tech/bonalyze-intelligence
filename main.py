@@ -1,32 +1,37 @@
-import os
 import asyncio
 import datetime
 import argparse
-import time
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict
 
 # Local imports
 from scraper import Scraper
 from sentinel import Sentinel
 from config import settings
 from models import BonalyzeOffer
+from embedder import Embedder
+from data_sync import DataSync
+from run_policy import evaluate_run_failure_reason
+from runtime_utils import parse_allowed_stores
 
 # Configure structured logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("Bonalyze")
 
-# Conditionally import these to avoid initialization errors if keys are missing during dry run
-try:
-    from embedder import Embedder
-    from data_sync import DataSync
-except ImportError:
-    Embedder = None
-    DataSync = None
-
 async def main_async():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true", help="Run without DB/API writes")
+    parser.add_argument(
+        "--allow-partial-success",
+        action="store_true",
+        help="Do not fail process if at least one retailer fails.",
+    )
+    parser.add_argument(
+        "--max-failure-rate",
+        type=float,
+        default=settings.MAX_FAILURE_RATE,
+        help="Maximum tolerated failed/fetched ratio before failing the run.",
+    )
     args = parser.parse_args()
 
     run_start_time = datetime.datetime.now()
@@ -70,12 +75,20 @@ async def main_async():
         f"Enterprise Sync: Using configured embedding model '{settings.GEMINI_EMBEDDING_MODEL}' "
         f"(api={settings.GEMINI_API_VERSION}, target_dim=768)."
     )
-    ALLOWED_STORES = ["kaufland", "aldi-sued", "edeka"]
-    stores = [s for s in scraper.retailer_mapping.keys() if s in ALLOWED_STORES] if scraper.retailer_mapping else ALLOWED_STORES
-    total_stats = {"fetched": 0, "inserted": 0, "failed": 0, "embedded": 0, "pruned": 0}
+    allowed_stores = parse_allowed_stores(settings.ALLOWED_STORES)
+    stores = [s for s in scraper.retailer_mapping.keys() if s in allowed_stores] if scraper.retailer_mapping else allowed_stores
+    total_stats: Dict[str, int | float] = {
+        "fetched": 0,
+        "inserted": 0,
+        "failed": 0,
+        "embedded": 0,
+        "pruned": 0,
+        "store_errors": 0,
+    }
 
     for store in stores:
         logger.info(f"--- Processing Retailer: {store} ---")
+        store_had_error = False
         
         try:
             # Mark: Fetch offers
@@ -115,6 +128,9 @@ async def main_async():
                     total_stats["embedded"] += len(embeddings_map)
                 except Exception as e:
                     logger.error(f"Embedding Phase Failed for {store}: {e}")
+                    total_stats["failed"] += len(offers)
+                    total_stats["store_errors"] += 1
+                    continue
 
             # Sync to Supabase
             if not args.dry_run and data_sync:
@@ -141,18 +157,29 @@ async def main_async():
                 except Exception as e:
                     logger.error(f"Sync/Prune Phase Failed for {store}: {e}")
                     total_stats["failed"] += len(offers)
+                    total_stats["store_errors"] += 1
+                    store_had_error = True
             else:
                  logger.debug(f"[Dry Run] Skipping DB sync for {store}")
 
             # Politeness
-            time.sleep(1)
+            await asyncio.sleep(1)
 
         except Exception as e:
             logger.error(f"Processing Error for {store}: {e}")
+            total_stats["store_errors"] += 1
+            store_had_error = True
+
+        if not store_had_error:
+            logger.info(f"Retailer {store} processed successfully.")
 
     # 4. Summary Phase
     run_end_time = datetime.datetime.now()
     duration = (run_end_time - run_start_time).total_seconds()
+    fetched = int(total_stats["fetched"])
+    failed = int(total_stats["failed"])
+    failure_rate = (failed / fetched) if fetched else 1.0
+    total_stats["failure_rate"] = failure_rate
     
     logger.info("="*50)
     logger.info("FINAL ENTERPRISE RUN SUMMARY")
@@ -163,7 +190,21 @@ async def main_async():
     logger.info(f"Pruned:    {total_stats['pruned']} (Stale/Expired)")
     logger.info(f"Embedded:  {total_stats['embedded']}")
     logger.info(f"Failed:    {total_stats['failed']}")
+    logger.info(f"StoreErrors: {total_stats['store_errors']}")
+    logger.info(f"FailureRate: {failure_rate:.2%}")
     logger.info("="*50)
+
+    allow_partial_success = args.allow_partial_success or not settings.FAIL_ON_PARTIAL_SYNC
+    failure_reason = evaluate_run_failure_reason(
+        total_stats,
+        dry_run=args.dry_run,
+        allow_partial_success=allow_partial_success,
+        max_failure_rate=max(args.max_failure_rate, 0.0),
+    )
+    if failure_reason:
+        logger.error(f"Run health check failed: {failure_reason}")
+        raise SystemExit(2)
+    logger.info("Sync erfolgreich beendet. Alle Batches verarbeitet.")
 
 def main():
     asyncio.run(main_async())

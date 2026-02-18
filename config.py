@@ -23,8 +23,8 @@ class Settings(BaseSettings):
     MAX_RETRIES: int = 3
     RETRY_DELAY: int = 1
     SCRAPER_BATCH_SIZE: int = 50
-    SCRAPER_DELAY_MIN_SEC: float = 0.35
-    SCRAPER_DELAY_MAX_SEC: float = 0.85
+    SCRAPER_DELAY_MIN_SEC: float = 1
+    SCRAPER_DELAY_MAX_SEC: float = 3
     ALLOWED_STORES: str = "kaufland,aldi-sued,edeka"
     
     # Sentinel Config

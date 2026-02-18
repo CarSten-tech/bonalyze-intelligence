@@ -55,7 +55,6 @@ class DataSync:
             include={
                 "product_name",
                 "price",
-                "regular_price",
                 "retailer",
                 "image_url",
                 "source_url",
@@ -69,7 +68,7 @@ class DataSync:
         )
         row["product_name"] = normalize_whitespace(row.get("product_name", ""))
         row["store"] = row.pop("retailer")
-        row["original_price"] = row.pop("regular_price", None)
+        row["original_price"] = float(offer.regular_price)
         row["valid_until"] = row.pop("valid_to", None)
         slug = slugify(row.get("product_name", ""))
         row["product_slug"] = slug or f"offer-{row['offer_id']}"
