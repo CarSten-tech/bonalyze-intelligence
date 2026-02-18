@@ -43,7 +43,7 @@ class Embedder:
             try:
                 # Attempt batch embedding
                 result = self.client.models.embed_content(
-                    model=self.model,
+                    model=f"models/{self.model}",
                     contents=batch,
                     config={'title': "Product Embedding"} 
                 )
@@ -73,7 +73,7 @@ class Embedder:
         for text in texts:
             try:
                 result = self.client.models.embed_content(
-                    model=self.model,
+                    model=f"models/{self.model}",
                     contents=text,
                     config={'title': "Product Embedding"}
                 )

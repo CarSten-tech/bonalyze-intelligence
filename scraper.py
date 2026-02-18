@@ -48,7 +48,12 @@ class Scraper:
             logger.info("Scraper: Loading retailer configurations from Supabase...")
             response = self.supabase.table("retailer_configs").select("retailer_key, retailer_id").eq("is_active", True).execute()
             if response.data:
-                self.retailer_mapping = {row["retailer_key"]: row["retailer_id"] for row in response.data}
+                self.retailer_mapping = {}
+                for row in response.data:
+                    key = row["retailer_key"]
+                    if key == "aldi_sued":
+                        key = "aldi-sued"
+                    self.retailer_mapping[key] = row["retailer_id"]
                 logger.info(f"Scraper: Loaded {len(self.retailer_mapping)} retailer configs: {list(self.retailer_mapping.keys())}")
             else:
                 logger.warning("Scraper: No active retailer configs found in Supabase.")
