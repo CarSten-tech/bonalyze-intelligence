@@ -24,6 +24,52 @@ def _is_retryable_request_exception(exc: BaseException) -> bool:
     return False
 
 class Scraper:
+    TOP_CATEGORY_RULES: List[tuple[str, tuple[str, ...]]] = [
+        ("Lebensmittel", (
+            "lebensmittel", "kaese", "kase", "brot", "fleisch", "wurst", "obst", "gemuese",
+            "gemuse", "joghurt", "butter", "milch", "nudel", "reis", "back", "dessert",
+            "pizza", "snack", "schokolade", "frucht", "sauce", "fisch", "eier", "teigwaren",
+        )),
+        ("Getraenke", (
+            "getraenk", "getrank", "wasser", "saft", "cola", "limonade", "bier", "wein",
+            "sekt", "kaffee", "tee", "energy", "drink", "sirup", "smoothie", "alkohol",
+        )),
+        ("Drogerie", (
+            "drogerie", "hygiene", "kosmetik", "pflege", "deo", "dusch", "shampoo",
+            "zahnpasta", "slipeinlagen", "tampon", "creme", "body", "makeup",
+        )),
+        ("Haushalt", (
+            "haushalt", "reinigung", "reiniger", "geschirr", "spuel", "spul", "putz",
+            "waschmittel", "kuche", "kueche", "behaelter", "behalter",
+        )),
+        ("Tierbedarf", (
+            "tier", "hund", "katze", "haustier", "futter",
+        )),
+        ("Baby & Kind", (
+            "baby", "kind", "windel", "nuckel", "kinder",
+        )),
+        ("Gesundheit", (
+            "gesundheit", "medizin", "apotheke", "vitamin", "pflaster",
+        )),
+        ("Baumarkt & Garten", (
+            "baumarkt", "garten", "bohr", "werkzeug", "schraub", "saege", "sage",
+            "rasen", "pflanze", "duenger", "dunger",
+        )),
+        ("Elektronik", (
+            "elektronik", "akku", "batterie", "robot", "roboter", "multimeter", "led", "tv",
+            "smartphone", "computer",
+        )),
+        ("Mode", (
+            "mode", "socken", "hoodie", "jacke", "shirt", "hose", "schuh",
+        )),
+        ("Wohnen", (
+            "wohnen", "sofa", "moebel", "mobel", "bett", "lampe", "stuhl",
+        )),
+        ("Freizeit & Sport", (
+            "sport", "fitness", "outdoor", "wandern", "freizeit", "fahrrad",
+        )),
+    ]
+
     def __init__(self, discovered_headers: Optional[Dict[str, str]] = None):
         self.session = requests.Session()
         
@@ -198,11 +244,16 @@ class Scraper:
                 if not category:
                     continue
 
+                product = item.get("product") if isinstance(item.get("product"), dict) else None
+                product_name = normalize_whitespace(str((product or {}).get("name") or ""))
+                category = self._to_top_category(category, product_name)
+                if not category:
+                    continue
+
                 offer_id = normalize_whitespace(str(item.get("id") or ""))
                 if offer_id and offer_id not in self._global_offer_categories_by_offer_id:
                     self._global_offer_categories_by_offer_id[offer_id] = category
 
-                product = item.get("product") if isinstance(item.get("product"), dict) else None
                 if product:
                     product_id = normalize_whitespace(str(product.get("id") or ""))
                     if product_id and product_id not in self._global_offer_categories_by_product_id:
@@ -242,7 +293,7 @@ class Scraper:
 
             by_offer_id = self._global_offer_categories_by_offer_id.get(offer.offer_id)
             if by_offer_id:
-                offer.category = by_offer_id
+                offer.category = self._to_top_category(by_offer_id, offer.product_name)
                 enriched += 1
                 continue
 
@@ -255,7 +306,7 @@ class Scraper:
             if product_id:
                 by_product_id = self._global_offer_categories_by_product_id.get(product_id)
                 if by_product_id:
-                    offer.category = by_product_id
+                    offer.category = self._to_top_category(by_product_id, offer.product_name)
                     enriched += 1
 
         missing_after = sum(1 for offer in offers if not offer.category)
@@ -312,6 +363,29 @@ class Scraper:
                 value = Scraper._extract_category(item)
                 if value:
                     return value
+        return None
+
+    @staticmethod
+    def _normalize_for_matching(text: str) -> str:
+        normalized = normalize_whitespace(text).lower()
+        for src, dst in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
+            normalized = normalized.replace(src, dst)
+        return normalized
+
+    @classmethod
+    def _to_top_category(cls, raw_category: Optional[str], product_name: Optional[str] = None) -> Optional[str]:
+        category_text = normalize_whitespace(raw_category or "")
+        product_text = normalize_whitespace(product_name or "")
+        if not category_text and not product_text:
+            return None
+
+        match_haystack = cls._normalize_for_matching(f"{category_text} {product_text}")
+        for top_category, keywords in cls.TOP_CATEGORY_RULES:
+            if any(keyword in match_haystack for keyword in keywords):
+                return top_category
+
+        if category_text:
+            return "Sonstiges"
         return None
 
     def _parse_offer(self, item: Dict[str, Any], retailer: str) -> Optional[BonalyzeOffer]:
@@ -386,6 +460,7 @@ class Scraper:
                 category = self._extract_category(candidate)
                 if category:
                     break
+            category = self._to_top_category(category, full_name)
 
             image_url = None
             if mg_offer.id:

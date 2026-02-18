@@ -53,7 +53,7 @@ def test_parse_offer_extracts_category_name():
         "edeka",
     )
     assert offer is not None
-    assert offer.category == "Molkerei"
+    assert offer.category == "Lebensmittel"
 
 
 def test_parse_offer_extracts_category_from_categories_list():
@@ -63,7 +63,7 @@ def test_parse_offer_extracts_category_from_categories_list():
         "edeka",
     )
     assert offer is not None
-    assert offer.category == "Käse"
+    assert offer.category == "Lebensmittel"
 
 
 def test_parse_offer_extracts_category_from_product_categories():
@@ -73,7 +73,7 @@ def test_parse_offer_extracts_category_from_product_categories():
         "edeka",
     )
     assert offer is not None
-    assert offer.category == "Molkerei"
+    assert offer.category == "Lebensmittel"
 
 
 def test_parse_offer_extracts_category_from_category_name_field():
@@ -83,7 +83,7 @@ def test_parse_offer_extracts_category_from_category_name_field():
         "edeka",
     )
     assert offer is not None
-    assert offer.category == "Backwaren"
+    assert offer.category == "Lebensmittel"
 
 
 def test_parse_offer_without_retailer_block_still_parses():
@@ -99,7 +99,7 @@ def test_parse_offer_without_retailer_block_still_parses():
         "edeka",
     )
     assert offer is not None
-    assert offer.category == "Molkerei"
+    assert offer.category == "Lebensmittel"
 
 
 def test_enrich_categories_with_global_offers_by_offer_and_product():
@@ -128,5 +128,15 @@ def test_enrich_categories_with_global_offers_by_offer_and_product():
 
     scraper._enrich_categories_with_global_offers(offers, "edeka")
 
-    assert offer_1.category == "Käse"
-    assert offer_2.category == "Brot"
+    assert offer_1.category == "Lebensmittel"
+    assert offer_2.category == "Lebensmittel"
+
+
+def test_parse_offer_maps_getraenke_top_category():
+    scraper = object.__new__(Scraper)
+    offer = scraper._parse_offer(
+        _valid_item(category={"name": "Bier"}),
+        "edeka",
+    )
+    assert offer is not None
+    assert offer.category == "Getraenke"
