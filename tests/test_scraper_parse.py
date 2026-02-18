@@ -106,6 +106,7 @@ def test_enrich_categories_with_global_offers_by_offer_and_product():
     scraper = object.__new__(Scraper)
     scraper._global_offer_categories_by_offer_id = {"offer-1": "Käse"}
     scraper._global_offer_categories_by_product_id = {"prod-2": "Brot"}
+    scraper._global_offer_categories_by_product_name = {}
     scraper._global_category_index_loaded = True
 
     offer_1 = BonalyzeOffer(
@@ -158,3 +159,9 @@ def test_parse_offer_maps_food_subcategories():
     assert scraper._to_category_label("Obst", "Äpfel") == "Lebensmittel > Obst"
     assert scraper._to_category_label("Tiefkühl", "TK Pizza") == "Lebensmittel > Tiefkühl"
     assert scraper._to_category_label("Konserve", "Dosentomaten") == "Lebensmittel > Konserven & Haltbares"
+    assert scraper._to_category_label(None, "Zuckererbsen Ägypt. Zuckererbsen Kl. I je 200-g-Packg.") == "Lebensmittel > Gemüse"
+    assert scraper._to_category_label(None, "Haferflocken 100 % Vollkorn je 500-g-Packg.") == "Lebensmittel > Grundnahrungsmittel"
+    assert scraper._to_category_label(None, "Rispentomaten Dtsch. Kl. I je 650-g-Packg.") == "Lebensmittel > Gemüse"
+    assert scraper._to_category_label(None, "XXL Hähnchenflügel HKL A je 1-kg-Großpackg.") == "Lebensmittel > Fleisch, Wurst & Fisch"
+    assert scraper._to_category_label(None, "Schlagrahm mind. 32 % Fett je 500-g-Packg.") == "Lebensmittel > Milchprodukte & Eier"
+    assert scraper._to_category_label(None, "Bitter ital. Aperitif 25 Vol. % je 0,7-l-Fl.") == "Getränke > Alkohol"

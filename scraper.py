@@ -2,6 +2,8 @@ import requests
 import time
 import logging
 import random
+import re
+from collections import Counter, defaultdict
 from typing import List, Dict, Optional, Any
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
@@ -33,20 +35,24 @@ class Scraper:
         "eistee", "energy", "smoothie", "kakao", "milchdrink", "softdrink", "alkoholfrei",
     )
     FOOD_SUBCATEGORY_RULES: List[tuple[str, tuple[str, ...]]] = [
-        ("Lebensmittel > Konserven & Haltbares", ("konserve", "dose", "eingemacht", "haltbar", "vorrat", "glas")),
-        ("Lebensmittel > Gemüse", ("gemuese", "gemuse", "salat", "zwiebel", "kartoffel", "paprika", "tomate", "gurke", "brokkoli", "karotte")),
-        ("Lebensmittel > Obst", ("obst", "apfel", "banane", "traube", "beere", "orange", "zitrone", "birne", "mandarine")),
-        ("Lebensmittel > Tiefkühl", ("tk", "tiefkuehl", "tiefkuhl", "frozen", "tiefkühl")),
-        ("Lebensmittel > Milchprodukte & Eier", ("milch", "joghurt", "quark", "kaese", "kase", "butter", "sahne", "eier")),
-        ("Lebensmittel > Fleisch, Wurst & Fisch", ("fleisch", "wurst", "schwein", "rind", "huhn", "haehnchen", "gefluegel", "geflugel", "fisch", "lachs")),
-        ("Lebensmittel > Brot & Backwaren", ("brot", "broet", "brotchen", "back", "croissant", "toast", "baguette", "kuchen")),
-        ("Lebensmittel > Süßes & Snacks", ("snack", "schokolade", "keks", "chips", "praline", "bonbon", "riegel", "sues", "suss")),
-        ("Lebensmittel > Fertiggerichte", ("fertig", "instant", "pizza", "lasagne", "eintopf", "suppe", "menue", "menu", "microwave")),
-        ("Lebensmittel > Grundnahrungsmittel", ("nudel", "reis", "mehl", "zucker", "oel", "ol", "gewuerz", "gewurz", "essig", "haferflocken")),
+        ("Lebensmittel > Konserven & Haltbares", ("konserve", "dose", "eingemacht", "haltbar", "vorrat", "glas", "polpa", "passiert", "konfituere", "marmelade", "honig")),
+        ("Lebensmittel > Gemüse", ("gemuese", "gemuse", "salat", "zwiebel", "kartoffel", "paprika", "tomate", "tomaten", "gurke", "gurken", "broccoli", "brokkoli", "karotte", "erbse", "zuckererbse", "spinat", "kohl", "lauch", "zucchini", "avocado", "olive", "oliven")),
+        ("Lebensmittel > Obst", ("obst", "apfel", "banane", "traube", "beere", "orange", "zitrone", "birne", "mandarine", "kiwi", "pomelo", "ananas", "mango")),
+        ("Lebensmittel > Tiefkühl", ("tk", "tiefkuehl", "tiefkuhl", "frozen", "tiefkühl", "eis", "pommes")),
+        ("Lebensmittel > Milchprodukte & Eier", ("milch", "molkerei", "joghurt", "quark", "kaese", "kase", "butter", "sahne", "rahm", "eier", "frischkaese")),
+        ("Lebensmittel > Fleisch, Wurst & Fisch", ("fleisch", "wurst", "schwein", "rind", "huhn", "haehnchen", "gefluegel", "geflugel", "fisch", "lachs", "garnelen", "bacon", "salami", "kabanos", "wuerstchen", "wurstchen")),
+        ("Lebensmittel > Brot & Backwaren", ("brot", "broet", "brotchen", "back", "croissant", "toast", "baguette", "kuchen", "broetchen", "zopf", "schnecke")),
+        ("Lebensmittel > Süßes & Snacks", ("snack", "schokolade", "keks", "chips", "praline", "bonbon", "riegel", "sues", "suss", "pick up", "gummibaer", "gummibar")),
+        ("Lebensmittel > Fertiggerichte", ("fertig", "instant", "pizza", "lasagne", "eintopf", "suppe", "menue", "menu", "microwave", "kartoffelgericht", "airfryer")),
+        ("Lebensmittel > Gewürze, Öle & Saucen", ("gewuerz", "gewurz", "wuerze", "wurzpaste", "fix", "sauce", "pesto", "oel", "ol", "olivenoel", "rapsoel", "essig")),
+        ("Lebensmittel > Grundnahrungsmittel", ("nudel", "reis", "mehl", "zucker", "haferflocken", "linsen", "bohnen", "gries", "hafer")),
     ]
+    BASE_FOOD_KEYWORDS: tuple[str, ...] = (
+        "lebensmittel", "essen", "nahrung", "naehr", "genuss", "feinkost",
+    )
     OTHER_TOP_CATEGORY_RULES: List[tuple[str, tuple[str, ...]]] = [
         ("Drogerie", ("drogerie", "hygiene", "kosmetik", "pflege", "deo", "dusch", "shampoo", "zahnpasta", "slipeinlagen", "tampon", "creme", "body", "makeup")),
-        ("Haushalt", ("haushalt", "reinigung", "reiniger", "geschirr", "spuel", "spul", "putz", "waschmittel", "kueche", "kuche", "behaelter", "behalter")),
+        ("Haushalt", ("haushalt", "reinigung", "reiniger", "geschirr", "spuel", "spul", "putz", "waschmittel", "kueche", "kuche", "behaelter", "behalter", "muell", "mull", "staub", "wischer", "eimer", "toilettenpapier", "taschentuecher", "taschentucher", "lufterfrischer", "duft")),
         ("Tierbedarf", ("tier", "hund", "katze", "haustier", "futter")),
         ("Baby & Kind", ("baby", "kind", "windel", "nuckel", "kinder")),
         ("Gesundheit", ("gesundheit", "medizin", "apotheke", "vitamin", "pflaster")),
@@ -85,6 +91,7 @@ class Scraper:
         self.retailer_mapping: Dict[str, str] = {}
         self._global_offer_categories_by_offer_id: Dict[str, str] = {}
         self._global_offer_categories_by_product_id: Dict[str, str] = {}
+        self._global_offer_categories_by_product_name: Dict[str, str] = {}
         self._global_category_index_loaded: bool = False
 
     def load_retailer_configs(self):
@@ -206,6 +213,7 @@ class Scraper:
         offset = 0
         total_results = None
         scanned = 0
+        product_name_votes: Dict[str, Counter[str]] = defaultdict(Counter)
 
         while True:
             data = self._make_request(
@@ -246,16 +254,26 @@ class Scraper:
                     if product_id and product_id not in self._global_offer_categories_by_product_id:
                         self._global_offer_categories_by_product_id[product_id] = category
 
+                product_name_key = self._name_lookup_key(product_name)
+                if product_name_key:
+                    product_name_votes[product_name_key][category] += 1
+
             scanned += len(results)
             offset += limit
             if total_results and offset >= total_results:
                 break
 
+        self._global_offer_categories_by_product_name = {
+            key: votes.most_common(1)[0][0]
+            for key, votes in product_name_votes.items()
+            if votes
+        }
         self._global_category_index_loaded = True
         logger.info(
             "Category enrichment: Indexed "
             f"{len(self._global_offer_categories_by_offer_id)} offer IDs and "
-            f"{len(self._global_offer_categories_by_product_id)} product IDs "
+            f"{len(self._global_offer_categories_by_product_id)} product IDs, "
+            f"{len(self._global_offer_categories_by_product_name)} product names "
             f"(scanned {scanned} rows)."
         )
 
@@ -295,6 +313,40 @@ class Scraper:
                 if by_product_id:
                     offer.category = self._to_category_label(by_product_id, offer.product_name)
                     enriched += 1
+                    continue
+
+            name_candidates: List[str] = []
+            if isinstance(offer.raw_data, dict):
+                product = offer.raw_data.get("product")
+                if isinstance(product, dict):
+                    product_name = normalize_whitespace(str(product.get("name") or ""))
+                    if product_name:
+                        name_candidates.append(product_name)
+            if offer.product_name:
+                name_candidates.append(offer.product_name)
+                for sep in (" je ", ",", " oder ", " / "):
+                    if sep in offer.product_name:
+                        head = normalize_whitespace(offer.product_name.split(sep)[0])
+                        if head:
+                            name_candidates.append(head)
+
+            for name_candidate in name_candidates:
+                key = self._name_lookup_key(name_candidate)
+                if not key:
+                    continue
+                by_name = self._global_offer_categories_by_product_name.get(key)
+                if by_name:
+                    offer.category = self._to_category_label(by_name, offer.product_name)
+                    enriched += 1
+                    break
+
+            if offer.category:
+                continue
+
+            inferred = self._to_category_label(None, offer.product_name)
+            if inferred:
+                offer.category = inferred
+                enriched += 1
 
         missing_after = sum(1 for offer in offers if not offer.category)
         logger.info(
@@ -360,32 +412,70 @@ class Scraper:
         return normalized
 
     @classmethod
+    def _name_lookup_key(cls, text: str) -> str:
+        normalized = cls._normalize_for_matching(text)
+        normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        return normalized
+
+    @classmethod
+    def _tokenize_for_matching(cls, text: str) -> List[str]:
+        return re.findall(r"[a-z0-9]+", cls._name_lookup_key(text))
+
+    @classmethod
+    def _keyword_score(cls, haystack: str, token_set: set[str], keywords: tuple[str, ...]) -> int:
+        score = 0
+        for keyword in keywords:
+            kw = cls._name_lookup_key(keyword)
+            if not kw:
+                continue
+            if " " in kw:
+                if kw in haystack:
+                    score += 2
+                continue
+            if kw in token_set:
+                score += 2
+            elif kw in haystack:
+                score += 1
+        return score
+
+    @classmethod
     def _to_category_label(cls, raw_category: Optional[str], product_name: Optional[str] = None) -> Optional[str]:
         category_text = normalize_whitespace(raw_category or "")
         product_text = normalize_whitespace(product_name or "")
         if not category_text and not product_text:
             return None
 
-        match_haystack = cls._normalize_for_matching(f"{category_text} {product_text}")
+        match_haystack = cls._name_lookup_key(f"{category_text} {product_text}")
+        token_set = set(cls._tokenize_for_matching(match_haystack))
 
-        if any(keyword in match_haystack for keyword in cls.DRINK_ALCOHOL_KEYWORDS):
+        alcohol_score = cls._keyword_score(match_haystack, token_set, cls.DRINK_ALCOHOL_KEYWORDS)
+        non_alcohol_score = cls._keyword_score(match_haystack, token_set, cls.DRINK_NON_ALCOHOL_KEYWORDS)
+        if alcohol_score >= 2 and alcohol_score >= non_alcohol_score + 1:
             return "Getränke > Alkohol"
-        if any(keyword in match_haystack for keyword in cls.DRINK_NON_ALCOHOL_KEYWORDS):
+        if non_alcohol_score >= 2:
             return "Getränke > Alkoholfrei"
         if "getraenk" in match_haystack or "getrank" in match_haystack:
             return "Getränke > Alkoholfrei"
 
+        best_food_category: Optional[str] = None
+        best_food_score = 0
         for food_category, keywords in cls.FOOD_SUBCATEGORY_RULES:
-            if any(keyword in match_haystack for keyword in keywords):
-                return food_category
-        if "lebensmittel" in match_haystack:
+            score = cls._keyword_score(match_haystack, token_set, keywords)
+            if score > best_food_score:
+                best_food_score = score
+                best_food_category = food_category
+        if best_food_category and best_food_score >= 1:
+            return best_food_category
+
+        if cls._keyword_score(match_haystack, token_set, cls.BASE_FOOD_KEYWORDS) >= 1:
             return "Lebensmittel > Sonstiges"
 
         for top_category, keywords in cls.OTHER_TOP_CATEGORY_RULES:
-            if any(keyword in match_haystack for keyword in keywords):
+            if cls._keyword_score(match_haystack, token_set, keywords) >= 2:
                 return top_category
 
-        if category_text:
+        if category_text or product_text:
             return "Sonstiges"
         return None
 
