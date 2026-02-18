@@ -1,18 +1,27 @@
 import requests
 import time
 import logging
+import random
 from typing import List, Dict, Optional, Any
-from datetime import datetime
-from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
 from config import settings
-from models import BonalyzeOffer, MarktguruOffer, OfferImage
+from models import BonalyzeOffer, MarktguruOffer
+from normalization import normalize_whitespace
 
 from supabase import create_client, Client
 
-# Logging setup
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+TRANSIENT_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
+
+
+def _is_retryable_request_exception(exc: BaseException) -> bool:
+    if isinstance(exc, (requests.Timeout, requests.ConnectionError)):
+        return True
+    if isinstance(exc, requests.HTTPError):
+        status_code = exc.response.status_code if exc.response is not None else None
+        return status_code in TRANSIENT_STATUS_CODES
+    return False
 
 class Scraper:
     def __init__(self, discovered_headers: Optional[Dict[str, str]] = None):
@@ -60,14 +69,20 @@ class Scraper:
         except Exception as e:
             logger.error(f"Scraper: Failed to load retailer configs: {e}")
 
-    @retry(stop=stop_after_attempt(settings.MAX_RETRIES), wait=wait_fixed(settings.RETRY_DELAY), retry=retry_if_exception_type(requests.RequestException))
+    @retry(
+        stop=stop_after_attempt(settings.MAX_RETRIES),
+        wait=wait_exponential(multiplier=max(settings.RETRY_DELAY, 1), min=1, max=12),
+        retry=retry_if_exception(_is_retryable_request_exception),
+        reraise=True,
+    )
     def _make_request(self, url: str, params: Dict[str, Any]) -> Dict[str, Any]:
         try:
             response = self.session.get(url, params=params, timeout=settings.DEFAULT_TIMEOUT)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.HTTPError as e:
-            logger.error(f"HTTP Error for {url}: {e.response.status_code} - {e.response.text}")
+            status_code = e.response.status_code if e.response is not None else "unknown"
+            logger.error(f"HTTP Error for {url}: {status_code} - {e.response.text if e.response is not None else str(e)}")
             raise e
 
     def fetch_offers(self, retailer_key: str, max_items: Optional[int] = None) -> List[BonalyzeOffer]:
@@ -84,7 +99,6 @@ class Scraper:
         limit = settings.SCRAPER_BATCH_SIZE
         offset = 0
         total_results = None
-        raw_count = 0
 
         target_count = 435 # Baseline expectation from Website analysis
         logger.info(f"Using Publisher-API for {retailer_key}. Target: ~{target_count} items expected.")
@@ -112,7 +126,6 @@ class Scraper:
                 if not results:
                     break
 
-                raw_count += len(results)
                 for item in results:
                     parsed = self._parse_offer(item, retailer_key)
                     if parsed:
@@ -124,8 +137,10 @@ class Scraper:
                 if offset >= total_results:
                     break
                 
-                # Rate limiting
-                time.sleep(0.5)
+                # Rate limiting with jitter to reduce bot-like patterns.
+                min_delay = min(settings.SCRAPER_DELAY_MIN_SEC, settings.SCRAPER_DELAY_MAX_SEC)
+                max_delay = max(settings.SCRAPER_DELAY_MIN_SEC, settings.SCRAPER_DELAY_MAX_SEC)
+                time.sleep(random.uniform(min_delay, max_delay))
 
             except Exception as e:
                 logger.error(f"Error fetching offers at offset {offset}: {e}")
@@ -133,6 +148,33 @@ class Scraper:
         
         logger.info(f"Publisher-API: Received {len(all_offers)} curated items for {retailer_key}.")
         return all_offers
+
+    @staticmethod
+    def _build_source_url(item: Dict[str, Any], retailer: str, offer_id: Any) -> str:
+        candidates: List[Optional[str]] = [
+            item.get("sourceUrl"),
+            item.get("sourceURL"),
+            item.get("offerUrl"),
+            item.get("offerURL"),
+            item.get("url"),
+            item.get("landingPageUrl"),
+            item.get("deeplink"),
+        ]
+        product = item.get("product")
+        if isinstance(product, dict):
+            candidates.append(product.get("url"))
+
+        for candidate in candidates:
+            if isinstance(candidate, str):
+                value = normalize_whitespace(candidate)
+                if value:
+                    return value
+
+        retailer_slug = normalize_whitespace(retailer).lower() or "unknown"
+        offer_id_text = normalize_whitespace(str(offer_id or ""))
+        if offer_id_text:
+            return f"https://www.marktguru.de/angebote/{retailer_slug}/{offer_id_text}"
+        return f"https://www.marktguru.de/angebote/{retailer_slug}"
 
     def _parse_offer(self, item: Dict[str, Any], retailer: str) -> Optional[BonalyzeOffer]:
         """Parse a single offer item with strict filtering."""
@@ -171,17 +213,16 @@ class Scraper:
 
             # --- PARSING ---
             product = mg_offer.product
-            name = product.name
-            description = mg_offer.description or product.description
+            name = normalize_whitespace(product.name)
+            description = normalize_whitespace(mg_offer.description or product.description or "")
             
             full_name = name
             if description and description not in [name, ""]:
-                full_name = f"{name} {description}"
+                full_name = normalize_whitespace(f"{name} {description}")
 
             price = mg_offer.price
-            ref_price = mg_offer.referencePrice
-            # We already checked oldPrice > price above
-            regular_price = mg_offer.oldPrice 
+            # Use current price as fallback when oldPrice is missing.
+            regular_price = mg_offer.oldPrice if mg_offer.oldPrice is not None else mg_offer.price
 
             unit = None
             if mg_offer.unit:
@@ -191,6 +232,7 @@ class Scraper:
             image_url = None
             if mg_offer.id:
                 image_url = f"https://mg2de.b-cdn.net/api/v1/offers/{mg_offer.id}/images/default/0/medium.webp"
+            source_url = self._build_source_url(item, retailer, mg_offer.id)
 
             return BonalyzeOffer(
                 retailer=retailer,
@@ -203,6 +245,7 @@ class Scraper:
                 valid_from=valid_from,
                 valid_to=valid_to,
                 image_url=image_url,
+                source_url=source_url,
                 offer_id=str(mg_offer.id),
                 raw_data=item
             )

@@ -1,18 +1,27 @@
 import logging
 import base64
 import json
-import re
-import unicodedata
 from supabase import create_client, Client
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 from typing import List, Dict, Any
 from postgrest.exceptions import APIError
 from datetime import datetime
 
 from config import settings
 from models import BonalyzeOffer
+from normalization import slugify, normalize_whitespace
 
 logger = logging.getLogger(__name__)
+TRANSIENT_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
+
+
+def _is_retryable_sync_exception(exc: BaseException) -> bool:
+    if isinstance(exc, APIError):
+        status_code = getattr(exc, "status_code", None)
+        if isinstance(status_code, int):
+            return status_code in TRANSIENT_STATUS_CODES or status_code >= 500
+        return False
+    return isinstance(exc, (TimeoutError, ConnectionError, OSError))
 
 class DataSync:
     def __init__(self):
@@ -40,17 +49,47 @@ class DataSync:
             return None
 
     @staticmethod
-    def _slugify(value: str) -> str:
-        if not value:
-            return ""
-        normalized = unicodedata.normalize("NFKD", value)
-        ascii_value = normalized.encode("ascii", "ignore").decode("ascii")
-        ascii_value = ascii_value.lower().strip()
-        ascii_value = re.sub(r"[^a-z0-9]+", "-", ascii_value)
-        ascii_value = re.sub(r"-{2,}", "-", ascii_value).strip("-")
-        return ascii_value
+    def _build_offer_row(offer: BonalyzeOffer) -> Dict[str, Any]:
+        row = offer.model_dump(
+            mode="json",
+            include={
+                "product_name",
+                "price",
+                "regular_price",
+                "retailer",
+                "image_url",
+                "source_url",
+                "valid_from",
+                "valid_to",
+                "scraped_at",
+                "embedding",
+                "offer_id",
+                "currency",
+            },
+        )
+        row["product_name"] = normalize_whitespace(row.get("product_name", ""))
+        row["store"] = row.pop("retailer")
+        row["original_price"] = row.pop("regular_price", None)
+        row["valid_until"] = row.pop("valid_to", None)
+        slug = slugify(row.get("product_name", ""))
+        row["product_slug"] = slug or f"offer-{row['offer_id']}"
+        source_url = normalize_whitespace(row.get("source_url", ""))
+        if not source_url:
+            store_slug = normalize_whitespace(row.get("store", "")).lower() or "unknown"
+            offer_id_text = normalize_whitespace(str(row.get("offer_id", "")))
+            if offer_id_text:
+                source_url = f"https://www.marktguru.de/angebote/{store_slug}/{offer_id_text}"
+            else:
+                source_url = f"https://www.marktguru.de/angebote/{store_slug}"
+        row["source_url"] = source_url
+        return row
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type((APIError, Exception)))
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception(_is_retryable_sync_exception),
+        reraise=True,
+    )
     def sync_offers_batch(self, offers: List[BonalyzeOffer]) -> Dict[str, int]:
         """
         Syncs a batch of offers to Supabase.
@@ -72,28 +111,7 @@ class DataSync:
         
         data_to_upsert = []
         for offer in offers_to_sync:
-            row = offer.model_dump(
-                mode="json",
-                include={
-                    "product_name",
-                    "price",
-                    "regular_price",
-                    "retailer",
-                    "image_url",
-                    "valid_from",
-                    "valid_to",
-                    "scraped_at",
-                    "embedding",
-                    "offer_id",
-                    "currency",
-                },
-            )
-            row["store"] = row.pop("retailer")
-            row["original_price"] = row.pop("regular_price", None)
-            row["valid_until"] = row.pop("valid_to", None)
-            slug = self._slugify(row.get("product_name", ""))
-            row["product_slug"] = slug or f"offer-{row['offer_id']}"
-            data_to_upsert.append(row)
+            data_to_upsert.append(self._build_offer_row(offer))
 
         if not data_to_upsert:
              return stats
@@ -158,4 +176,4 @@ class DataSync:
 
     def sync_offer(self, offer: dict):
         """Legacy wrapper"""
-        pass
+        raise NotImplementedError("sync_offer is deprecated. Use sync_offers_batch instead.")
