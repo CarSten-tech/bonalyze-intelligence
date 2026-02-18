@@ -1,6 +1,8 @@
 import logging
 import base64
 import json
+import re
+import unicodedata
 from supabase import create_client, Client
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from typing import List, Dict, Any
@@ -36,6 +38,17 @@ class DataSync:
             return role if isinstance(role, str) else None
         except Exception:
             return None
+
+    @staticmethod
+    def _slugify(value: str) -> str:
+        if not value:
+            return ""
+        normalized = unicodedata.normalize("NFKD", value)
+        ascii_value = normalized.encode("ascii", "ignore").decode("ascii")
+        ascii_value = ascii_value.lower().strip()
+        ascii_value = re.sub(r"[^a-z0-9]+", "-", ascii_value)
+        ascii_value = re.sub(r"-{2,}", "-", ascii_value).strip("-")
+        return ascii_value
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type((APIError, Exception)))
     def sync_offers_batch(self, offers: List[BonalyzeOffer]) -> Dict[str, int]:
@@ -78,6 +91,8 @@ class DataSync:
             row["store"] = row.pop("retailer")
             row["original_price"] = row.pop("regular_price", None)
             row["valid_until"] = row.pop("valid_to", None)
+            slug = self._slugify(row.get("product_name", ""))
+            row["product_slug"] = slug or f"offer-{row['offer_id']}"
             data_to_upsert.append(row)
 
         if not data_to_upsert:
