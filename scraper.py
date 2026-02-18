@@ -126,10 +126,19 @@ class Scraper:
                 if not results:
                     break
 
+                parsed_in_page: List[BonalyzeOffer] = []
                 for item in results:
                     parsed = self._parse_offer(item, retailer_key)
                     if parsed:
+                        parsed_in_page.append(parsed)
                         all_offers.append(parsed)
+
+                if parsed_in_page:
+                    with_category = sum(1 for offer in parsed_in_page if offer.category)
+                    logger.info(
+                        f"Category coverage ({retailer_key}, offset {offset}): "
+                        f"{with_category}/{len(parsed_in_page)} offers with category."
+                    )
 
                 offset += limit
                 logger.info(f"Fetched {len(all_offers)} filtered offers (Raw offset: {offset}/{total_results})...")
@@ -185,10 +194,16 @@ class Scraper:
             category = normalize_whitespace(category_raw)
             return category or None
         if isinstance(category_raw, dict):
-            candidate = category_raw.get("name") or category_raw.get("title")
-            if isinstance(candidate, str):
-                category = normalize_whitespace(candidate)
-                return category or None
+            for key in ("name", "title", "label", "text", "categoryName"):
+                candidate = category_raw.get(key)
+                if isinstance(candidate, str):
+                    category = normalize_whitespace(candidate)
+                    if category:
+                        return category
+            for key in ("category", "categories", "parent", "node"):
+                value = Scraper._extract_category(category_raw.get(key))
+                if value:
+                    return value
         if isinstance(category_raw, list):
             for item in category_raw:
                 value = Scraper._extract_category(item)
@@ -248,11 +263,26 @@ class Scraper:
             if mg_offer.unit:
                 unit = mg_offer.unit.shortName
             amount = mg_offer.quantity
-            category = self._extract_category(mg_offer.category)
-            if not category:
-                category = self._extract_category(mg_offer.categories)
-            if not category:
-                category = self._extract_category(item.get("categories"))
+            product_raw = item.get("product") if isinstance(item.get("product"), dict) else {}
+            category = None
+            category_candidates = [
+                mg_offer.category,
+                mg_offer.categories,
+                item.get("category"),
+                item.get("categories"),
+                item.get("categoryName"),
+                item.get("category_name"),
+                item.get("categoryTitle"),
+                item.get("categoryPath"),
+                product_raw.get("category"),
+                product_raw.get("categories"),
+                product_raw.get("categoryName"),
+                product_raw.get("category_name"),
+            ]
+            for candidate in category_candidates:
+                category = self._extract_category(candidate)
+                if category:
+                    break
 
             image_url = None
             if mg_offer.id:

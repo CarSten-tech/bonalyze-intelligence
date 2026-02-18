@@ -63,3 +63,23 @@ def test_parse_offer_extracts_category_from_categories_list():
     )
     assert offer is not None
     assert offer.category == "Käse"
+
+
+def test_parse_offer_extracts_category_from_product_categories():
+    scraper = object.__new__(Scraper)
+    offer = scraper._parse_offer(
+        _valid_item(product={"id": 501, "name": "Frikadelle", "categories": [{"name": "Molkerei"}]}),
+        "edeka",
+    )
+    assert offer is not None
+    assert offer.category == "Molkerei"
+
+
+def test_parse_offer_extracts_category_from_category_name_field():
+    scraper = object.__new__(Scraper)
+    offer = scraper._parse_offer(
+        _valid_item(categoryName="Backwaren"),
+        "edeka",
+    )
+    assert offer is not None
+    assert offer.category == "Backwaren"
