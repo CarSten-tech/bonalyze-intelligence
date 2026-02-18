@@ -6,6 +6,20 @@ class OfferImage(BaseModel):
     id: Optional[int] = None
     images: Optional[dict] = None # Or more specific if needed
 
+class MarktguruProduct(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    brand: Optional[str] = None
+
+class MarktguruOfferUnit(BaseModel):
+    id: int
+    shortName: Optional[str] = None
+
+class MarktguruValidityDate(BaseModel):
+    from_: datetime = Field(alias="from")
+    to: datetime
+
 class MarktguruRetailer(BaseModel):
     id: int
     name: str
