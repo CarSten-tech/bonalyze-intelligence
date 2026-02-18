@@ -1,0 +1,48 @@
+name: Bonalyze Intelligence Sync
+
+on:
+  schedule:
+    # Automatisch jeden Morgen um 04:00 Uhr UTC
+    - cron: "0 4 * * *"
+  # Erlaubt den manuellen Start über den "Actions"-Tab in GitHub
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Nur Testlauf (keine DB-Writes)?"
+        required: true
+        default: false
+        type: boolean
+
+jobs:
+  build-and-run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          # Wichtig für den Sentinel (Playwright Browser)
+          playwright install --with-deps chromium
+
+      - name: Run Scraper Engine
+        env:
+          # Diese Secrets musst du in GitHub hinterlegen
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          # Prüft, ob der manuelle Input "dry_run" aktiv ist
+          if [ "${{ github.event.inputs.dry_run }}" == "true" ]; then
+            python main.py --dry-run
+          else
+            python main.py
+          fi
