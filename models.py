@@ -58,6 +58,7 @@ class BonalyzeOffer(BaseModel):
     unit: Optional[str] = None
     amount: Optional[Any] = None
     currency: str = "EUR"
+    category: Optional[str] = None
     valid_from: Optional[datetime] = None
     valid_to: Optional[datetime] = None
     image_url: Optional[str] = None

@@ -11,6 +11,7 @@ def _offer(product_name: str, offer_id: str) -> BonalyzeOffer:
         price=1.99,
         regular_price=2.49,
         currency="EUR",
+        category="Molkerei",
         valid_from=datetime(2026, 2, 15),
         valid_to=datetime(2026, 2, 21),
         image_url="https://example.com/image.webp",
@@ -28,6 +29,7 @@ def test_build_offer_row_sets_required_db_fields():
     assert row["valid_until"] is not None
     assert row["product_slug"] == "frikadelle-im-brotchen-stuck"
     assert row["source_url"] == "https://www.marktguru.de/angebote/edeka/123"
+    assert row["category"] == "Molkerei"
 
 
 def test_build_offer_row_uses_offer_id_slug_fallback():
@@ -42,6 +44,7 @@ def test_build_offer_row_uses_source_url_fallback():
         price=1.99,
         regular_price=2.49,
         currency="EUR",
+        category=None,
         valid_from=datetime(2026, 2, 15),
         valid_to=datetime(2026, 2, 21),
         image_url="https://example.com/image.webp",

@@ -43,3 +43,13 @@ def test_parse_offer_prefers_payload_source_url():
     )
     assert offer is not None
     assert offer.source_url == "https://example.com/offers/21755305"
+
+
+def test_parse_offer_extracts_category_name():
+    scraper = object.__new__(Scraper)
+    offer = scraper._parse_offer(
+        _valid_item(category={"id": 12, "name": "Molkerei"}),
+        "edeka",
+    )
+    assert offer is not None
+    assert offer.category == "Molkerei"

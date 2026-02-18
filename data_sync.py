@@ -55,6 +55,7 @@ class DataSync:
             include={
                 "product_name",
                 "price",
+                "regular_price",
                 "retailer",
                 "image_url",
                 "source_url",
@@ -64,12 +65,15 @@ class DataSync:
                 "embedding",
                 "offer_id",
                 "currency",
+                "category",
             },
         )
         row["product_name"] = normalize_whitespace(row.get("product_name", ""))
         row["store"] = row.pop("retailer")
-        row["original_price"] = float(offer.regular_price)
+        row["original_price"] = float(row.pop("regular_price", offer.regular_price))
         row["valid_until"] = row.pop("valid_to", None)
+        category = normalize_whitespace(str(row.get("category") or ""))
+        row["category"] = category or None
         slug = slugify(row.get("product_name", ""))
         row["product_slug"] = slug or f"offer-{row['offer_id']}"
         source_url = normalize_whitespace(row.get("source_url", ""))
@@ -94,6 +98,7 @@ class DataSync:
         Syncs a batch of offers to Supabase.
         Upsert is efficient for batches.
         """
+        logger.info("Syncing fields including category for filtering support.")
         if not offers:
             return {"inserted": 0, "updated": 0, "failed": 0}
 

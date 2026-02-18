@@ -179,6 +179,23 @@ class Scraper:
             return f"https://www.marktguru.de/angebote/{retailer_slug}/{offer_id_text}"
         return f"https://www.marktguru.de/angebote/{retailer_slug}"
 
+    @staticmethod
+    def _extract_category(category_raw: Any) -> Optional[str]:
+        if isinstance(category_raw, str):
+            category = normalize_whitespace(category_raw)
+            return category or None
+        if isinstance(category_raw, dict):
+            candidate = category_raw.get("name") or category_raw.get("title")
+            if isinstance(candidate, str):
+                category = normalize_whitespace(candidate)
+                return category or None
+        if isinstance(category_raw, list):
+            for item in category_raw:
+                value = Scraper._extract_category(item)
+                if value:
+                    return value
+        return None
+
     def _parse_offer(self, item: Dict[str, Any], retailer: str) -> Optional[BonalyzeOffer]:
         """Parse a single offer item with strict filtering."""
         try:
@@ -231,6 +248,7 @@ class Scraper:
             if mg_offer.unit:
                 unit = mg_offer.unit.shortName
             amount = mg_offer.quantity
+            category = self._extract_category(mg_offer.category)
 
             image_url = None
             if mg_offer.id:
@@ -245,6 +263,7 @@ class Scraper:
                 unit=unit,
                 amount=amount,
                 currency="EUR",
+                category=category,
                 valid_from=valid_from,
                 valid_to=valid_to,
                 image_url=image_url,
