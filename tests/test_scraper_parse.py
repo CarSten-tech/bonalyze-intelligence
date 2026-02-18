@@ -53,3 +53,13 @@ def test_parse_offer_extracts_category_name():
     )
     assert offer is not None
     assert offer.category == "Molkerei"
+
+
+def test_parse_offer_extracts_category_from_categories_list():
+    scraper = object.__new__(Scraper)
+    offer = scraper._parse_offer(
+        _valid_item(categories=[{"id": 163, "name": "Käse"}]),
+        "edeka",
+    )
+    assert offer is not None
+    assert offer.category == "Käse"

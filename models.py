@@ -37,6 +37,7 @@ class MarktguruOffer(BaseModel):
     product: MarktguruProduct
     retailer: Optional[MarktguruRetailer] = None
     category: Optional[Any] = None
+    categories: Optional[List[Any]] = None
     price: float
     oldPrice: Optional[float] = None
     referencePrice: Optional[float] = None

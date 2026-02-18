@@ -249,6 +249,10 @@ class Scraper:
                 unit = mg_offer.unit.shortName
             amount = mg_offer.quantity
             category = self._extract_category(mg_offer.category)
+            if not category:
+                category = self._extract_category(mg_offer.categories)
+            if not category:
+                category = self._extract_category(item.get("categories"))
 
             image_url = None
             if mg_offer.id:
