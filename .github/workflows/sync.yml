@@ -2,8 +2,8 @@ name: Bonalyze Intelligence Sync
 
 on:
   schedule:
-    # Automatisch jeden Morgen um 04:00 Uhr UTC
-    - cron: "0 4 * * *"
+    # Automatisch Montag & Donnerstag um 04:00 Uhr UTC
+    - cron: "0 4 * * 1,4"
   # Erlaubt den manuellen Start über den "Actions"-Tab in GitHub
   workflow_dispatch:
     inputs:
