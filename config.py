@@ -24,10 +24,10 @@ class Settings(BaseSettings):
     SCRAPER_BATCH_SIZE: int = 50
     
     # Sentinel Config
-    SENTINEL_TIMEOUT: int = 60000
+    SENTINEL_TIMEOUT: int = 120000
     
     # Embedder Config
-    GEMINI_EMBEDDING_MODEL: str = "models/embedding-001"
+    GEMINI_EMBEDDING_MODEL: str = "text-embedding-004"
     EMBEDDING_BATCH_SIZE: int = 100
     
 settings = Settings()

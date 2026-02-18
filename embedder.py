@@ -1,17 +1,16 @@
-import os
 import logging
 from google import genai
 from supabase import create_client, Client
-from dotenv import load_dotenv
 from tenacity import retry, stop_after_attempt, wait_exponential
 from typing import List, Dict
-import time
 
 from config import settings
 
 logger = logging.getLogger(__name__)
 
 class Embedder:
+    EMBEDDING_DIMENSION = 768
+
     def __init__(self):
         # Initialize Supabase
         if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
@@ -24,6 +23,24 @@ class Embedder:
         
         self.client = genai.Client(api_key=settings.GEMINI_API_KEY, http_options={'api_version': 'v1'})
         self.model = settings.GEMINI_EMBEDDING_MODEL
+
+    def _is_404_error(self, error: Exception) -> bool:
+        status_code = getattr(error, "status_code", None)
+        if status_code == 404:
+            return True
+
+        code = getattr(error, "code", None)
+        if code == 404:
+            return True
+
+        response = getattr(error, "response", None)
+        if response is not None and getattr(response, "status_code", None) == 404:
+            return True
+
+        return "404" in str(error)
+
+    def _is_valid_embedding(self, values: List[float] | None) -> bool:
+        return bool(values) and len(values) == self.EMBEDDING_DIMENSION
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     def _generate_embeddings_api(self, texts: List[str]) -> List[List[float]]:
@@ -45,18 +62,30 @@ class Embedder:
                 result = self.client.models.embed_content(
                     model=self.model,
                     contents=batch,
-                    config={'title': "Product Embedding", 'output_dimensionality': 768} 
+                    config={"output_dimensionality": self.EMBEDDING_DIMENSION}
                 )
-                
-                if result.embeddings:
-                    embeddings.extend([emb.values for emb in result.embeddings])
-                else:
-                     logger.warning(f"Embedder: Batch {i//BATCH_SIZE} returned no embeddings. Attempting individual fallback.")
-                     embeddings.extend(self._generate_individual_fallback(batch))
+
+                batch_embeddings = getattr(result, "embeddings", None)
+                if not batch_embeddings or len(batch_embeddings) != len(batch):
+                    logger.warning(
+                        f"Embedder: Batch {i//BATCH_SIZE} returned empty/incomplete embeddings. Attempting individual fallback."
+                    )
+                    embeddings.extend(self._generate_individual_fallback(batch))
+                    continue
+
+                for text, emb in zip(batch, batch_embeddings):
+                    values = getattr(emb, "values", None)
+                    if self._is_valid_embedding(values):
+                        embeddings.append(values)
+                    else:
+                        logger.warning(
+                            f"Embedder: Invalid embedding dimension for '{text[:50]}...'. Attempting individual fallback."
+                        )
+                        embeddings.extend(self._generate_individual_fallback([text]))
                      
             except Exception as e:
                 # 404 Handling: Warning only, don't crash the scraper
-                if "404" in str(e):
+                if self._is_404_error(e):
                     logger.warning(f"Embedder: Model not found (404) for batch {i//BATCH_SIZE}. Skipping batch. Error: {e}")
                     # Return empty embeddings for this batch to keep the scraper running
                     embeddings.extend([[] for _ in batch])
@@ -75,15 +104,25 @@ class Embedder:
                 result = self.client.models.embed_content(
                     model=self.model,
                     contents=text,
-                    config={'title': "Product Embedding", 'output_dimensionality': 768}
+                    config={"output_dimensionality": self.EMBEDDING_DIMENSION}
                 )
-                if result.embeddings and len(result.embeddings) > 0:
-                    safe_embeddings.append(result.embeddings[0].values)
+
+                batch_embeddings = getattr(result, "embeddings", None)
+                if batch_embeddings and len(batch_embeddings) > 0:
+                    values = getattr(batch_embeddings[0], "values", None)
+                    if self._is_valid_embedding(values):
+                        safe_embeddings.append(values)
+                    else:
+                        logger.warning(f"Embedder: Invalid embedding shape for text: {text[:50]}...")
+                        safe_embeddings.append([])
                 else:
-                    logger.error(f"Embedder: Could not generate embedding for text: {text[:50]}...")
-                    safe_embeddings.append([]) # Append empty to maintain index/zip alignment if needed, or handle upstream
+                    logger.warning(f"Embedder: Could not generate embedding for text: {text[:50]}...")
+                    safe_embeddings.append([])
             except Exception as e:
-                logger.error(f"Embedder: Failed individual embedding for '{text[:50]}...': {e}")
+                if self._is_404_error(e):
+                    logger.warning(f"Embedder: Model not found (404) for text '{text[:50]}...'.")
+                else:
+                    logger.error(f"Embedder: Failed individual embedding for '{text[:50]}...': {e}")
                 safe_embeddings.append([])
         return safe_embeddings
 
@@ -100,10 +139,10 @@ class Embedder:
 
         results = {}
         missing_texts = []
+        unique_texts = list(set(texts))
         
         # 1. Check Cache
         try:
-            unique_texts = list(set(texts))
             CACHE_LOOKUP_CHUNK = 200
             for i in range(0, len(unique_texts), CACHE_LOOKUP_CHUNK):
                 chunk = unique_texts[i:i+CACHE_LOOKUP_CHUNK]
@@ -111,7 +150,9 @@ class Embedder:
                 
                 if response.data:
                     for row in response.data:
-                        results[row["name"]] = row["embedding"]
+                        emb = row.get("embedding")
+                        if self._is_valid_embedding(emb):
+                            results[row["name"]] = emb
 
         except Exception as e:
             logger.warning(f"Cache lookup error: {e}")
@@ -129,13 +170,19 @@ class Embedder:
         # 2. Generate Missing
         try:
             new_embeddings = self._generate_embeddings_api(missing_texts)
+            if len(new_embeddings) < len(missing_texts):
+                new_embeddings.extend([[] for _ in range(len(missing_texts) - len(new_embeddings))])
+            elif len(new_embeddings) > len(missing_texts):
+                new_embeddings = new_embeddings[:len(missing_texts)]
             
             # 3. Cache New
             upsert_data = []
             for text, emb in zip(missing_texts, new_embeddings):
-                results[text] = emb
-                if emb and len(emb) > 0: # Robustness: Only cache if we actually have dimensions
+                if self._is_valid_embedding(emb):
+                    results[text] = emb
                     upsert_data.append({"name": text, "embedding": emb})
+                else:
+                    logger.warning(f"Embedder: Skipping '{text[:50]}...' because no valid {self.EMBEDDING_DIMENSION}-dim embedding was generated.")
             
             if upsert_data:
                 UPSERT_CHUNK = 100

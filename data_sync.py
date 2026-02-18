@@ -26,24 +26,34 @@ class DataSync:
             return {"inserted": 0, "updated": 0, "failed": 0}
 
         stats = {"inserted": 0, "updated": 0, "failed": 0}
+
+        offers_to_sync = [o for o in offers if o.embedding and len(o.embedding) == 768]
+        skipped_offers = len(offers) - len(offers_to_sync)
+        if skipped_offers:
+            logger.warning(f"DataSync: Skipping {skipped_offers} offers without valid 768-dim embedding.")
+            stats["failed"] += skipped_offers
+
+        if not offers_to_sync:
+            return stats
         
         data_to_upsert = []
-        for offer in offers:
-            row = offer.model_dump(mode='json', exclude={"raw_data"})
-            
-            # Map Python model fields to Database columns
+        for offer in offers_to_sync:
+            row = offer.model_dump(
+                mode="json",
+                include={
+                    "product_name",
+                    "price",
+                    "regular_price",
+                    "retailer",
+                    "image_url",
+                    "valid_from",
+                    "valid_to",
+                    "embedding",
+                    "offer_id",
+                    "currency",
+                },
+            )
             row["store"] = row.pop("retailer")
-            
-            # Schema corrections based on user feedback
-            if "valid_to" in row:
-                row["valid_until"] = row.pop("valid_to")
-            
-            if "unit" in row:
-                row["price_per_unit"] = row.pop("unit")
-                
-            if "amount" in row:
-                row["weight_volume"] = row.pop("amount")
-                
             data_to_upsert.append(row)
 
         if not data_to_upsert:
@@ -56,7 +66,7 @@ class DataSync:
             
         except Exception as e:
             logger.error(f"Batch upsert failed: {e}")
-            stats["failed"] += len(offers)
+            stats["failed"] += len(offers_to_sync)
             raise e 
 
         return stats

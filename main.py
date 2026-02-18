@@ -37,7 +37,7 @@ async def main_async():
     try:
         logger.info("Discovery Phase: Launching Sentinel to capture dynamic headers...")
         sentinel = Sentinel(headless=True)
-        discovered_headers = await sentinel.extract_headers()
+        discovered_headers = await asyncio.wait_for(sentinel.extract_headers(), timeout=120)
         logger.info(f"Discovery Phase: Captured {len(discovered_headers)} headers.")
     except Exception as e:
         logger.error(f"Discovery Phase Failed: {e}. Falling back to static configuration.")
@@ -66,7 +66,7 @@ async def main_async():
     scraper.load_retailer_configs()
     
     # 3. Execution Phase
-    logger.info("Enterprise Sync: Using stable embedding-001 (768-dim).")
+    logger.info("Enterprise Sync: Using stable text-embedding-004 (768-dim).")
     ALLOWED_STORES = ["kaufland", "aldi-sued", "edeka"]
     stores = [s for s in scraper.retailer_mapping.keys() if s in ALLOWED_STORES] if scraper.retailer_mapping else ALLOWED_STORES
     total_stats = {"fetched": 0, "inserted": 0, "failed": 0, "embedded": 0, "pruned": 0}
@@ -98,6 +98,15 @@ async def main_async():
                     # Assign to offers
                     for o in offers:
                         o.embedding = embeddings_map.get(o.product_name)
+
+                    valid_offer_count_before = len(offers)
+                    offers = [o for o in offers if o.embedding and len(o.embedding) == 768]
+                    dropped_offers = valid_offer_count_before - len(offers)
+                    if dropped_offers:
+                        logger.warning(f"Embedding Phase: Dropped {dropped_offers} offers without valid 768-dim embeddings.")
+                    if not offers:
+                        logger.warning(f"Embedding Phase: No valid embeddings for {store}. Skipping sync/prune for safety.")
+                        continue
                     
                     total_stats["embedded"] += len(embeddings_map)
                 except Exception as e:
