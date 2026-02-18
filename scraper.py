@@ -101,22 +101,40 @@ class Scraper:
         total_results = None
 
         target_count = 435 # Baseline expectation from Website analysis
-        logger.info(f"Using Publisher-API for {retailer_key}. Target: ~{target_count} items expected.")
+        logger.info(
+            f"Using offers API for {retailer_key} (retailer_id={retailer_id}). "
+            f"Target: ~{target_count} items expected."
+        )
 
         while True:
             # Check max_items
             if max_items and len(all_offers) >= max_items:
                 break
             try:
-                url = f"https://{settings.API_HOST}/api/v1/publishers/retailer/{retailer_key}/offers"
+                # Primary endpoint: includes category taxonomy (`categories`) for filtering.
+                url = f"https://{settings.API_HOST}/api/v1/offers"
                 params = {
-                    "as": "mobile",
+                    "retailerIds": retailer_id,
                     "zipCode": settings.ZIP_CODE,
                     "limit": limit,
-                    "offset": offset
+                    "offset": offset,
                 }
                 
-                data = self._make_request(url, params)
+                try:
+                    data = self._make_request(url, params)
+                except Exception as primary_error:
+                    logger.warning(
+                        f"Offers API failed for {retailer_key} at offset {offset}: {primary_error}. "
+                        "Falling back to publisher endpoint (categories may be unavailable)."
+                    )
+                    fallback_url = f"https://{settings.API_HOST}/api/v1/publishers/retailer/{retailer_key}/offers"
+                    fallback_params = {
+                        "as": "mobile",
+                        "zipCode": settings.ZIP_CODE,
+                        "limit": limit,
+                        "offset": offset,
+                    }
+                    data = self._make_request(fallback_url, fallback_params)
 
                 if total_results is None:
                     total_results = data.get("totalResults", 0)
@@ -219,8 +237,8 @@ class Scraper:
             
             # --- FILTER PIPELINE ---
             
-            # 1. Index Check: Must be True
-            if not mg_offer.retailer or not mg_offer.retailer.indexOffer:
+            # 1. Index Check: enforce only when retailer block exists in payload.
+            if mg_offer.retailer and not mg_offer.retailer.indexOffer:
                 return None
                 
             # 2. Price Check: Removed as per Enterprise-Prompt (Trust curated endoint)

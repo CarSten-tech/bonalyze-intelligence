@@ -83,3 +83,19 @@ def test_parse_offer_extracts_category_from_category_name_field():
     )
     assert offer is not None
     assert offer.category == "Backwaren"
+
+
+def test_parse_offer_without_retailer_block_still_parses():
+    scraper = object.__new__(Scraper)
+    offer = scraper._parse_offer(
+        _valid_item(
+            retailer=None,
+            categories=[{"id": 1, "name": "Molkerei"}],
+            validityDates=[{"from": "2026-02-15T00:00:00+00:00", "to": "2026-02-21T23:59:00+00:00"}],
+            validFrom=None,
+            validTo=None,
+        ),
+        "edeka",
+    )
+    assert offer is not None
+    assert offer.category == "Molkerei"
