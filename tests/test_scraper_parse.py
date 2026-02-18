@@ -53,7 +53,7 @@ def test_parse_offer_extracts_category_name():
         "edeka",
     )
     assert offer is not None
-    assert offer.category == "Lebensmittel"
+    assert offer.category == "Lebensmittel > Milchprodukte & Eier"
 
 
 def test_parse_offer_extracts_category_from_categories_list():
@@ -63,7 +63,7 @@ def test_parse_offer_extracts_category_from_categories_list():
         "edeka",
     )
     assert offer is not None
-    assert offer.category == "Lebensmittel"
+    assert offer.category == "Lebensmittel > Milchprodukte & Eier"
 
 
 def test_parse_offer_extracts_category_from_product_categories():
@@ -73,7 +73,7 @@ def test_parse_offer_extracts_category_from_product_categories():
         "edeka",
     )
     assert offer is not None
-    assert offer.category == "Lebensmittel"
+    assert offer.category == "Lebensmittel > Milchprodukte & Eier"
 
 
 def test_parse_offer_extracts_category_from_category_name_field():
@@ -83,7 +83,7 @@ def test_parse_offer_extracts_category_from_category_name_field():
         "edeka",
     )
     assert offer is not None
-    assert offer.category == "Lebensmittel"
+    assert offer.category == "Lebensmittel > Brot & Backwaren"
 
 
 def test_parse_offer_without_retailer_block_still_parses():
@@ -99,7 +99,7 @@ def test_parse_offer_without_retailer_block_still_parses():
         "edeka",
     )
     assert offer is not None
-    assert offer.category == "Lebensmittel"
+    assert offer.category == "Lebensmittel > Milchprodukte & Eier"
 
 
 def test_enrich_categories_with_global_offers_by_offer_and_product():
@@ -128,8 +128,8 @@ def test_enrich_categories_with_global_offers_by_offer_and_product():
 
     scraper._enrich_categories_with_global_offers(offers, "edeka")
 
-    assert offer_1.category == "Lebensmittel"
-    assert offer_2.category == "Lebensmittel"
+    assert offer_1.category == "Lebensmittel > Milchprodukte & Eier"
+    assert offer_2.category == "Lebensmittel > Brot & Backwaren"
 
 
 def test_parse_offer_maps_getraenke_top_category():
@@ -139,4 +139,22 @@ def test_parse_offer_maps_getraenke_top_category():
         "edeka",
     )
     assert offer is not None
-    assert offer.category == "Getraenke"
+    assert offer.category == "Getränke > Alkohol"
+
+
+def test_parse_offer_maps_getraenke_alkoholfrei():
+    scraper = object.__new__(Scraper)
+    offer = scraper._parse_offer(
+        _valid_item(category={"name": "Wasser"}),
+        "edeka",
+    )
+    assert offer is not None
+    assert offer.category == "Getränke > Alkoholfrei"
+
+
+def test_parse_offer_maps_food_subcategories():
+    scraper = object.__new__(Scraper)
+    assert scraper._to_category_label("Gemüse", "Rispentomaten") == "Lebensmittel > Gemüse"
+    assert scraper._to_category_label("Obst", "Äpfel") == "Lebensmittel > Obst"
+    assert scraper._to_category_label("Tiefkühl", "TK Pizza") == "Lebensmittel > Tiefkühl"
+    assert scraper._to_category_label("Konserve", "Dosentomaten") == "Lebensmittel > Konserven & Haltbares"
