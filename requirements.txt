@@ -1,5 +1,5 @@
 playwright
-google-genai
+google-genai>=0.3.0
 supabase
 python-dotenv
 playwright-stealth

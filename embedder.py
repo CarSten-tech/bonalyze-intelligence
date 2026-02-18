@@ -22,8 +22,8 @@ class Embedder:
         if not settings.GEMINI_API_KEY:
             raise ValueError("GEMINI_API_KEY must be set in environment variables.")
         
-        self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        self.model = "text-embedding-004"
+        self.client = genai.Client(api_key=settings.GEMINI_API_KEY, http_options={'api_version': 'v1'})
+        self.model = settings.GEMINI_EMBEDDING_MODEL
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     def _generate_embeddings_api(self, texts: List[str]) -> List[List[float]]:
@@ -55,9 +55,15 @@ class Embedder:
                      embeddings.extend(self._generate_individual_fallback(batch))
                      
             except Exception as e:
-                logger.error(f"Embedder: Batch {i//BATCH_SIZE} failed: {e}. Attempting individual fallback.")
-                # If batch fails, try each text individually to save as many as possible
-                embeddings.extend(self._generate_individual_fallback(batch))
+                # 404 Handling: Warning only, don't crash the scraper
+                if "404" in str(e):
+                    logger.warning(f"Embedder: Model not found (404) for batch {i//BATCH_SIZE}. Skipping batch. Error: {e}")
+                    # Return empty embeddings for this batch to keep the scraper running
+                    embeddings.extend([[] for _ in batch])
+                else:
+                    logger.error(f"Embedder: Batch {i//BATCH_SIZE} failed: {e}. Attempting individual fallback.")
+                    # If batch fails (non-404), try each text individually to save as many as possible
+                    embeddings.extend(self._generate_individual_fallback(batch))
                 
         return embeddings
 
