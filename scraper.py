@@ -138,8 +138,11 @@ class Scraper:
                     break
                 
                 # Rate limiting with jitter to reduce bot-like patterns.
-                min_delay = min(settings.SCRAPER_DELAY_MIN_SEC, settings.SCRAPER_DELAY_MAX_SEC)
-                max_delay = max(settings.SCRAPER_DELAY_MIN_SEC, settings.SCRAPER_DELAY_MAX_SEC)
+                fallback_delay = float(getattr(settings, "RETRY_DELAY", 1))
+                delay_min_cfg = float(getattr(settings, "SCRAPER_DELAY_MIN_SEC", fallback_delay))
+                delay_max_cfg = float(getattr(settings, "SCRAPER_DELAY_MAX_SEC", fallback_delay))
+                min_delay = max(0.0, min(delay_min_cfg, delay_max_cfg))
+                max_delay = max(min_delay, max(delay_min_cfg, delay_max_cfg))
                 time.sleep(random.uniform(min_delay, max_delay))
 
             except Exception as e:
