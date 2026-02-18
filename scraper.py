@@ -50,6 +50,9 @@ class Scraper:
         # Initialize Supabase client for retailer configs
         self.supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
         self.retailer_mapping: Dict[str, str] = {}
+        self._global_offer_categories_by_offer_id: Dict[str, str] = {}
+        self._global_offer_categories_by_product_id: Dict[str, str] = {}
+        self._global_category_index_loaded: bool = False
 
     def load_retailer_configs(self):
         """Load retailer mapping from Supabase."""
@@ -101,40 +104,21 @@ class Scraper:
         total_results = None
 
         target_count = 435 # Baseline expectation from Website analysis
-        logger.info(
-            f"Using offers API for {retailer_key} (retailer_id={retailer_id}). "
-            f"Target: ~{target_count} items expected."
-        )
+        logger.info(f"Using Publisher-API for {retailer_key}. Target: ~{target_count} items expected.")
 
         while True:
             # Check max_items
             if max_items and len(all_offers) >= max_items:
                 break
             try:
-                # Primary endpoint: includes category taxonomy (`categories`) for filtering.
-                url = f"https://{settings.API_HOST}/api/v1/offers"
+                url = f"https://{settings.API_HOST}/api/v1/publishers/retailer/{retailer_key}/offers"
                 params = {
-                    "retailerIds": retailer_id,
+                    "as": "mobile",
                     "zipCode": settings.ZIP_CODE,
                     "limit": limit,
                     "offset": offset,
                 }
-                
-                try:
-                    data = self._make_request(url, params)
-                except Exception as primary_error:
-                    logger.warning(
-                        f"Offers API failed for {retailer_key} at offset {offset}: {primary_error}. "
-                        "Falling back to publisher endpoint (categories may be unavailable)."
-                    )
-                    fallback_url = f"https://{settings.API_HOST}/api/v1/publishers/retailer/{retailer_key}/offers"
-                    fallback_params = {
-                        "as": "mobile",
-                        "zipCode": settings.ZIP_CODE,
-                        "limit": limit,
-                        "offset": offset,
-                    }
-                    data = self._make_request(fallback_url, fallback_params)
+                data = self._make_request(url, params)
 
                 if total_results is None:
                     total_results = data.get("totalResults", 0)
@@ -177,7 +161,108 @@ class Scraper:
                 break
         
         logger.info(f"Publisher-API: Received {len(all_offers)} curated items for {retailer_key}.")
+        self._enrich_categories_with_global_offers(all_offers, retailer_key)
         return all_offers
+
+    def _load_global_category_index(self) -> None:
+        if self._global_category_index_loaded:
+            return
+
+        logger.info("Category enrichment: Loading global category index from offers API...")
+        limit = 500
+        offset = 0
+        total_results = None
+        scanned = 0
+
+        while True:
+            data = self._make_request(
+                f"https://{settings.API_HOST}/api/v1/offers",
+                {
+                    "zipCode": settings.ZIP_CODE,
+                    "limit": limit,
+                    "offset": offset,
+                },
+            )
+
+            if total_results is None:
+                total_results = int(data.get("totalResults", 0) or 0)
+
+            results = data.get("results", [])
+            if not results:
+                break
+
+            for item in results:
+                category = self._extract_category(item.get("categories"))
+                if not category:
+                    category = self._extract_category(item.get("category"))
+                if not category:
+                    continue
+
+                offer_id = normalize_whitespace(str(item.get("id") or ""))
+                if offer_id and offer_id not in self._global_offer_categories_by_offer_id:
+                    self._global_offer_categories_by_offer_id[offer_id] = category
+
+                product = item.get("product") if isinstance(item.get("product"), dict) else None
+                if product:
+                    product_id = normalize_whitespace(str(product.get("id") or ""))
+                    if product_id and product_id not in self._global_offer_categories_by_product_id:
+                        self._global_offer_categories_by_product_id[product_id] = category
+
+            scanned += len(results)
+            offset += limit
+            if total_results and offset >= total_results:
+                break
+
+        self._global_category_index_loaded = True
+        logger.info(
+            "Category enrichment: Indexed "
+            f"{len(self._global_offer_categories_by_offer_id)} offer IDs and "
+            f"{len(self._global_offer_categories_by_product_id)} product IDs "
+            f"(scanned {scanned} rows)."
+        )
+
+    def _enrich_categories_with_global_offers(self, offers: List[BonalyzeOffer], retailer_key: str) -> None:
+        if not offers:
+            return
+
+        missing_before = sum(1 for offer in offers if not offer.category)
+        if missing_before == 0:
+            return
+
+        try:
+            self._load_global_category_index()
+        except Exception as exc:
+            logger.warning(f"Category enrichment skipped for {retailer_key}: {exc}")
+            return
+
+        enriched = 0
+        for offer in offers:
+            if offer.category:
+                continue
+
+            by_offer_id = self._global_offer_categories_by_offer_id.get(offer.offer_id)
+            if by_offer_id:
+                offer.category = by_offer_id
+                enriched += 1
+                continue
+
+            product_id = ""
+            if isinstance(offer.raw_data, dict):
+                product = offer.raw_data.get("product")
+                if isinstance(product, dict):
+                    product_id = normalize_whitespace(str(product.get("id") or ""))
+
+            if product_id:
+                by_product_id = self._global_offer_categories_by_product_id.get(product_id)
+                if by_product_id:
+                    offer.category = by_product_id
+                    enriched += 1
+
+        missing_after = sum(1 for offer in offers if not offer.category)
+        logger.info(
+            f"Category enrichment ({retailer_key}): "
+            f"enriched {enriched}, missing {missing_before}->{missing_after}."
+        )
 
     @staticmethod
     def _build_source_url(item: Dict[str, Any], retailer: str, offer_id: Any) -> str:

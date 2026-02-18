@@ -1,4 +1,5 @@
 from scraper import Scraper
+from models import BonalyzeOffer
 
 
 def _valid_item(**overrides):
@@ -99,3 +100,33 @@ def test_parse_offer_without_retailer_block_still_parses():
     )
     assert offer is not None
     assert offer.category == "Molkerei"
+
+
+def test_enrich_categories_with_global_offers_by_offer_and_product():
+    scraper = object.__new__(Scraper)
+    scraper._global_offer_categories_by_offer_id = {"offer-1": "Käse"}
+    scraper._global_offer_categories_by_product_id = {"prod-2": "Brot"}
+    scraper._global_category_index_loaded = True
+
+    offer_1 = BonalyzeOffer(
+        retailer="edeka",
+        product_name="Produkt 1",
+        price=1.0,
+        regular_price=1.0,
+        offer_id="offer-1",
+        raw_data={"product": {"id": "prod-1"}},
+    )
+    offer_2 = BonalyzeOffer(
+        retailer="edeka",
+        product_name="Produkt 2",
+        price=1.0,
+        regular_price=1.0,
+        offer_id="offer-2",
+        raw_data={"product": {"id": "prod-2"}},
+    )
+    offers = [offer_1, offer_2]
+
+    scraper._enrich_categories_with_global_offers(offers, "edeka")
+
+    assert offer_1.category == "Käse"
+    assert offer_2.category == "Brot"
