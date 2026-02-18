@@ -6,25 +6,22 @@ class OfferImage(BaseModel):
     id: Optional[int] = None
     images: Optional[dict] = None # Or more specific if needed
 
-class MarktguruProduct(BaseModel):
+class MarktguruRetailer(BaseModel):
     id: int
     name: str
-    description: Optional[str] = None
-    brand: Optional[str] = None
+    indexOffer: bool = False
 
-class MarktguruOfferUnit(BaseModel):
+class MarktguruCategory(BaseModel):
     id: int
-    shortName: Optional[str] = None
-
-class MarktguruValidityDate(BaseModel):
-    from_: datetime = Field(alias="from")
-    to: datetime
+    name: str
 
 class MarktguruOffer(BaseModel):
     model_config = ConfigDict(extra='ignore')
     
     id: int
     product: MarktguruProduct
+    retailer: Optional[MarktguruRetailer] = None
+    category: Optional[MarktguruCategory] = None
     price: float
     oldPrice: Optional[float] = None
     referencePrice: Optional[float] = None
@@ -32,6 +29,8 @@ class MarktguruOffer(BaseModel):
     quantity: Optional[Any] = None
     unit: Optional[MarktguruOfferUnit] = None
     validityDates: List[MarktguruValidityDate] = []
+    validFrom: Optional[datetime] = None
+    validTo: Optional[datetime] = None
     images: Optional[dict] = None # Metadata about images
 
 class BonalyzeOffer(BaseModel):

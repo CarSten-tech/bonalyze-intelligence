@@ -75,6 +75,7 @@ class Scraper:
         limit = settings.SCRAPER_BATCH_SIZE
         offset = 0
         total_results = None
+        raw_count = 0
 
         logger.info(f"Fetching offers for {retailer_key} (ID: {retailer_id})...")
 
@@ -101,13 +102,14 @@ class Scraper:
                 if not results:
                     break
 
+                raw_count += len(results)
                 for item in results:
                     parsed = self._parse_offer(item, retailer_key)
                     if parsed:
                         all_offers.append(parsed)
 
                 offset += limit
-                logger.info(f"Fetched {len(all_offers)}/{total_results} offers...")
+                logger.info(f"Fetched {len(all_offers)} filtered offers (Raw offset: {offset}/{total_results})...")
 
                 if offset >= total_results:
                     break
@@ -118,16 +120,52 @@ class Scraper:
             except Exception as e:
                 logger.error(f"Error fetching offers at offset {offset}: {e}")
                 break
-
+        
+        logger.info(f"Scraper Sanity Check ({retailer_key}): Raw: {raw_count} -> Filtered: {len(all_offers)}")
         return all_offers
 
     def _parse_offer(self, item: Dict[str, Any], retailer: str) -> Optional[BonalyzeOffer]:
-        """Parse a single offer item."""
+        """Parse a single offer item with strict filtering."""
         try:
             # Pydantic parsing for validation (strict)
             mg_offer = MarktguruOffer(**item)
             
-            # Helper to access nested data safely from the model
+            # --- FILTER PIPELINE ---
+            
+            # 1. Index Check: Must be True
+            if not mg_offer.retailer or not mg_offer.retailer.indexOffer:
+                return None
+                
+            # 2. Price Check: Only keep discount items (oldPrice > price)
+            if mg_offer.oldPrice is None or mg_offer.oldPrice <= mg_offer.price:
+                return None
+                
+            # 3. Category Check: Only Food & Drugstore
+            ALLOWED_CATEGORIES = ["Lebensmittel & Getränke", "Drogerie & Kosmetik"]
+            if not mg_offer.category or mg_offer.category.name not in ALLOWED_CATEGORIES:
+                return None
+                
+            # 4. Time Check: Duration <= 14 days
+            valid_from = None
+            valid_to = None
+            
+            # Priority: Flat fields, then list
+            if mg_offer.validFrom and mg_offer.validTo:
+                valid_from = mg_offer.validFrom
+                valid_to = mg_offer.validTo
+            elif mg_offer.validityDates:
+                valid_from = mg_offer.validityDates[0].from_
+                valid_to = mg_offer.validityDates[0].to
+                
+            if valid_from and valid_to:
+                duration = (valid_to - valid_from).days
+                if duration > 14:
+                    return None
+            else:
+                # If no validity info, we skip it for safety (enterprise rule)
+                return None
+
+            # --- PARSING ---
             product = mg_offer.product
             name = product.name
             description = mg_offer.description or product.description
@@ -138,15 +176,8 @@ class Scraper:
 
             price = mg_offer.price
             ref_price = mg_offer.referencePrice
-            old_price = mg_offer.oldPrice
-            
-            regular_price = ref_price if ref_price is not None else (old_price if old_price is not None else price)
-
-            valid_from = None
-            valid_to = None
-            if mg_offer.validityDates:
-                valid_from = mg_offer.validityDates[0].from_
-                valid_to = mg_offer.validityDates[0].to
+            # We already checked oldPrice > price above
+            regular_price = mg_offer.oldPrice 
 
             unit = None
             if mg_offer.unit:
