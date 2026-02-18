@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     
     # Gemini
     GEMINI_API_KEY: str
+    GEMINI_API_VERSION: str = "v1beta"
 
     # Scraper Config
     API_HOST: str = "api.marktguru.de"

@@ -10,9 +10,11 @@ if not api_key:
     print("No API Key found")
     exit(1)
 
-client = genai.Client(api_key=api_key)
+api_version = os.environ.get("GEMINI_API_VERSION", "v1beta")
+client = genai.Client(api_key=api_key, http_options={"api_version": api_version})
 
 try:
+    print("Using api_version:", api_version)
     response = client.models.embed_content(
         model="text-embedding-004",
         contents="Hello world"

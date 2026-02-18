@@ -104,6 +104,7 @@ async def main_async():
                     dropped_offers = valid_offer_count_before - len(offers)
                     if dropped_offers:
                         logger.warning(f"Embedding Phase: Dropped {dropped_offers} offers without valid 768-dim embeddings.")
+                        total_stats["failed"] += dropped_offers
                     if not offers:
                         logger.warning(f"Embedding Phase: No valid embeddings for {store}. Skipping sync/prune for safety.")
                         continue

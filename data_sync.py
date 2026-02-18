@@ -1,4 +1,6 @@
 import logging
+import base64
+import json
 from supabase import create_client, Client
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from typing import List, Dict, Any
@@ -15,6 +17,25 @@ class DataSync:
         if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
              raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set.")
         self.supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+        role = self._extract_jwt_role(settings.SUPABASE_KEY)
+        if role and role != "service_role":
+            logger.warning(
+                f"DataSync: SUPABASE_KEY role is '{role}'. For reliable upsert/delete with RLS, use the service_role key."
+            )
+
+    @staticmethod
+    def _extract_jwt_role(token: str) -> str | None:
+        try:
+            parts = token.split(".")
+            if len(parts) != 3:
+                return None
+            payload = parts[1] + "=" * (-len(parts[1]) % 4)
+            decoded = base64.urlsafe_b64decode(payload.encode("utf-8"))
+            obj = json.loads(decoded.decode("utf-8"))
+            role = obj.get("role")
+            return role if isinstance(role, str) else None
+        except Exception:
+            return None
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type((APIError, Exception)))
     def sync_offers_batch(self, offers: List[BonalyzeOffer]) -> Dict[str, int]:
@@ -48,12 +69,15 @@ class DataSync:
                     "image_url",
                     "valid_from",
                     "valid_to",
+                    "scraped_at",
                     "embedding",
                     "offer_id",
                     "currency",
                 },
             )
             row["store"] = row.pop("retailer")
+            row["original_price"] = row.pop("regular_price", None)
+            row["valid_until"] = row.pop("valid_to", None)
             data_to_upsert.append(row)
 
         if not data_to_upsert:

@@ -1,5 +1,6 @@
 import logging
 from google import genai
+from google.genai import types
 from supabase import create_client, Client
 from tenacity import retry, stop_after_attempt, wait_exponential
 from typing import List, Dict
@@ -10,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 class Embedder:
     EMBEDDING_DIMENSION = 768
+    MAX_SKIPPED_LOG_SAMPLES = 5
 
     def __init__(self):
         # Initialize Supabase
@@ -21,8 +23,18 @@ class Embedder:
         if not settings.GEMINI_API_KEY:
             raise ValueError("GEMINI_API_KEY must be set in environment variables.")
         
-        self.client = genai.Client(api_key=settings.GEMINI_API_KEY, http_options={'api_version': 'v1'})
         self.model = settings.GEMINI_EMBEDDING_MODEL
+        api_version = settings.GEMINI_API_VERSION
+        if self.model == "text-embedding-004" and api_version == "v1":
+            logger.warning("Embedder: text-embedding-004 is not supported on api_version=v1 for embedContent. Forcing v1beta.")
+            api_version = "v1beta"
+        self.api_version = api_version
+        self.client = genai.Client(
+            api_key=settings.GEMINI_API_KEY,
+            http_options=types.HttpOptions(api_version=self.api_version),
+        )
+        self._models_list_logged = False
+        logger.info(f"Embedder initialized with model='{self.model}', api_version='{self.api_version}'.")
 
     def _is_404_error(self, error: Exception) -> bool:
         status_code = getattr(error, "status_code", None)
@@ -41,6 +53,33 @@ class Embedder:
 
     def _is_valid_embedding(self, values: List[float] | None) -> bool:
         return bool(values) and len(values) == self.EMBEDDING_DIMENSION
+
+    def _log_available_embedding_models_once(self) -> None:
+        if self._models_list_logged:
+            return
+        self._models_list_logged = True
+
+        try:
+            models = self.client.models.list(config={"page_size": 100})
+            embedding_models: List[str] = []
+            for m in models:
+                supported_actions = set(getattr(m, "supported_actions", []) or [])
+                if "embedContent" in supported_actions or "batchEmbedContents" in supported_actions:
+                    name = getattr(m, "name", None)
+                    if name:
+                        embedding_models.append(name)
+
+            if embedding_models:
+                preview = ", ".join(embedding_models[:20])
+                logger.warning(
+                    f"Embedder diagnostics: embedding-capable models visible for current key/provider: {preview}"
+                )
+            else:
+                logger.warning(
+                    "Embedder diagnostics: no embedding-capable models returned by ListModels for current key/provider."
+                )
+        except Exception as e:
+            logger.warning(f"Embedder diagnostics: ListModels failed: {e}")
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     def _generate_embeddings_api(self, texts: List[str]) -> List[List[float]]:
@@ -86,9 +125,14 @@ class Embedder:
             except Exception as e:
                 # 404 Handling: Warning only, don't crash the scraper
                 if self._is_404_error(e):
-                    logger.warning(f"Embedder: Model not found (404) for batch {i//BATCH_SIZE}. Skipping batch. Error: {e}")
-                    # Return empty embeddings for this batch to keep the scraper running
-                    embeddings.extend([[] for _ in batch])
+                    logger.warning(
+                        f"Embedder: Model not found (404) for batch {i//BATCH_SIZE} (model={self.model}, api={self.api_version}). "
+                        "Skipping all remaining embedding batches."
+                    )
+                    self._log_available_embedding_models_once()
+                    remaining_items = len(texts) - len(embeddings)
+                    embeddings.extend([[] for _ in range(remaining_items)])
+                    break
                 else:
                     logger.error(f"Embedder: Batch {i//BATCH_SIZE} failed: {e}. Attempting individual fallback.")
                     # If batch fails (non-404), try each text individually to save as many as possible
@@ -121,6 +165,7 @@ class Embedder:
             except Exception as e:
                 if self._is_404_error(e):
                     logger.warning(f"Embedder: Model not found (404) for text '{text[:50]}...'.")
+                    self._log_available_embedding_models_once()
                 else:
                     logger.error(f"Embedder: Failed individual embedding for '{text[:50]}...': {e}")
                 safe_embeddings.append([])
@@ -177,12 +222,20 @@ class Embedder:
             
             # 3. Cache New
             upsert_data = []
+            skipped_texts = []
             for text, emb in zip(missing_texts, new_embeddings):
                 if self._is_valid_embedding(emb):
                     results[text] = emb
                     upsert_data.append({"name": text, "embedding": emb})
                 else:
-                    logger.warning(f"Embedder: Skipping '{text[:50]}...' because no valid {self.EMBEDDING_DIMENSION}-dim embedding was generated.")
+                    skipped_texts.append(text)
+
+            if skipped_texts:
+                preview = ", ".join(f"'{t[:40]}...'" for t in skipped_texts[: self.MAX_SKIPPED_LOG_SAMPLES])
+                logger.warning(
+                    f"Embedder: Skipped {len(skipped_texts)} items without valid {self.EMBEDDING_DIMENSION}-dim embeddings. "
+                    f"Examples: {preview}"
+                )
             
             if upsert_data:
                 UPSERT_CHUNK = 100
