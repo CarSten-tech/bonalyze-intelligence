@@ -35,17 +35,17 @@ class Scraper:
         "eistee", "energy", "smoothie", "kakao", "milchdrink", "softdrink", "alkoholfrei",
     )
     FOOD_SUBCATEGORY_RULES: List[tuple[str, tuple[str, ...]]] = [
-        ("Lebensmittel > Konserven & Haltbares", ("konserve", "dose", "eingemacht", "haltbar", "vorrat", "glas", "polpa", "passiert", "konfituere", "marmelade", "honig")),
-        ("Lebensmittel > Gemüse", ("gemuese", "gemuse", "salat", "zwiebel", "kartoffel", "paprika", "tomate", "tomaten", "gurke", "gurken", "broccoli", "brokkoli", "karotte", "erbse", "zuckererbse", "spinat", "kohl", "lauch", "zucchini", "avocado", "olive", "oliven")),
-        ("Lebensmittel > Obst", ("obst", "apfel", "banane", "traube", "beere", "orange", "zitrone", "birne", "mandarine", "kiwi", "pomelo", "ananas", "mango")),
         ("Lebensmittel > Tiefkühl", ("tk", "tiefkuehl", "tiefkuhl", "frozen", "tiefkühl", "eis", "pommes")),
+        ("Lebensmittel > Fertiggerichte", ("fertig", "instant", "pizza", "lasagne", "eintopf", "suppe", "menue", "menu", "microwave", "kartoffelgericht", "airfryer")),
+        ("Lebensmittel > Süßes & Snacks", ("snack", "schokolade", "chocolat", "keks", "chips", "praline", "bonbon", "riegel", "sues", "suss", "pick up", "gummibaer", "gummibar", "mousse", "dessert", "pudding")),
         ("Lebensmittel > Milchprodukte & Eier", ("milch", "molkerei", "joghurt", "quark", "kaese", "kase", "butter", "sahne", "rahm", "eier", "frischkaese")),
         ("Lebensmittel > Fleisch, Wurst & Fisch", ("fleisch", "wurst", "schwein", "rind", "huhn", "haehnchen", "gefluegel", "geflugel", "fisch", "lachs", "garnelen", "bacon", "salami", "kabanos", "wuerstchen", "wurstchen")),
         ("Lebensmittel > Brot & Backwaren", ("brot", "broet", "brotchen", "back", "croissant", "toast", "baguette", "kuchen", "broetchen", "zopf", "schnecke")),
-        ("Lebensmittel > Süßes & Snacks", ("snack", "schokolade", "keks", "chips", "praline", "bonbon", "riegel", "sues", "suss", "pick up", "gummibaer", "gummibar")),
-        ("Lebensmittel > Fertiggerichte", ("fertig", "instant", "pizza", "lasagne", "eintopf", "suppe", "menue", "menu", "microwave", "kartoffelgericht", "airfryer")),
+        ("Lebensmittel > Konserven & Haltbares", ("konserve", "dose", "eingemacht", "haltbar", "vorrat", "glas", "polpa", "passiert", "konfituere", "marmelade", "honig")),
         ("Lebensmittel > Gewürze, Öle & Saucen", ("gewuerz", "gewurz", "wuerze", "wurzpaste", "fix", "sauce", "pesto", "oel", "ol", "olivenoel", "rapsoel", "essig")),
         ("Lebensmittel > Grundnahrungsmittel", ("nudel", "reis", "mehl", "zucker", "haferflocken", "linsen", "bohnen", "gries", "hafer")),
+        ("Lebensmittel > Gemüse", ("gemuese", "gemuse", "salat", "zwiebel", "kartoffel", "paprika", "tomate", "tomaten", "gurke", "gurken", "broccoli", "brokkoli", "karotte", "moehre", "moehren", "erbse", "zuckererbse", "spinat", "kohl", "lauch", "zucchini", "avocado", "olive", "oliven", "spargel", "champignon", "pilz", "aubergine", "sellerie", "kuerbis", "radieschen", "knoblauch", "ingwer")),
+        ("Lebensmittel > Obst", ("obst", "apfel", "banane", "traube", "beere", "orange", "zitrone", "birne", "mandarine", "kiwi", "pomelo", "ananas", "mango", "pflaume", "pfirsich", "nektarine", "aprikose", "melone", "wassermelone", "kaki", "granatapfel", "grapefruit", "limette")),
     ]
     BASE_FOOD_KEYWORDS: tuple[str, ...] = (
         "lebensmittel", "essen", "nahrung", "naehr", "genuss", "feinkost",
@@ -510,9 +510,9 @@ class Scraper:
                 duration = (valid_to - valid_from).days
                 if duration > 14:
                     return None
-            else:
-                # If no validity info, we skip it for safety (enterprise rule)
-                return None
+            # We purposely do NOT skip items without validity dates here anymore. 
+            # Edeka and other retailers sometimes omit them in the API. We keep them.
+
 
             # --- PARSING ---
             product = mg_offer.product

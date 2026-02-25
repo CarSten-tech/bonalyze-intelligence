@@ -30,6 +30,14 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: |
+          python -m py_compile config.py models.py main.py scraper.py data_sync.py embedder.py sentinel.py normalization.py run_policy.py runtime_utils.py
+          pytest -q
+
+      - name: Install Playwright browser
+        run: |
           # Wichtig für den Sentinel (Playwright Browser)
           playwright install --with-deps chromium
 
