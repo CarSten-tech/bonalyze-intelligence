@@ -36,15 +36,15 @@ class Scraper:
     )
     FOOD_SUBCATEGORY_RULES: List[tuple[str, tuple[str, ...]]] = [
         ("Lebensmittel > Tiefkühl", ("tk", "tiefkuehl", "tiefkuhl", "frozen", "tiefkühl", "eis", "pommes")),
-        ("Lebensmittel > Fertiggerichte", ("fertig", "instant", "pizza", "lasagne", "eintopf", "suppe", "menue", "menu", "microwave", "kartoffelgericht", "airfryer")),
-        ("Lebensmittel > Süßes & Snacks", ("snack", "schokolade", "chocolat", "keks", "chips", "praline", "bonbon", "riegel", "sues", "suss", "pick up", "gummibaer", "gummibar", "mousse", "dessert", "pudding")),
-        ("Lebensmittel > Milchprodukte & Eier", ("milch", "molkerei", "joghurt", "quark", "kaese", "kase", "butter", "sahne", "rahm", "eier", "frischkaese")),
-        ("Lebensmittel > Fleisch, Wurst & Fisch", ("fleisch", "wurst", "schwein", "rind", "huhn", "haehnchen", "gefluegel", "geflugel", "fisch", "lachs", "garnelen", "bacon", "salami", "kabanos", "wuerstchen", "wurstchen")),
-        ("Lebensmittel > Brot & Backwaren", ("brot", "broet", "brotchen", "back", "croissant", "toast", "baguette", "kuchen", "broetchen", "zopf", "schnecke")),
+        ("Lebensmittel > Fertiggerichte", ("fertig", "instant", "pizza", "lasagne", "eintopf", "suppe", "menue", "menu", "microwave", "kartoffelgericht", "airfryer", "konservenmahlzeit")),
+        ("Lebensmittel > Süßes & Snacks", ("snack", "schokolade", "chocolat", "keks", "chips", "praline", "praliné", "bonbon", "riegel", "nuss", "nuesse", "kerne", "samen", "trailmix", "studentenfutter", "sues", "suss", "pick up", "gummibaer", "gummibar", "mousse", "dessert", "pudding")),
+        ("Lebensmittel > Milchprodukte & Eier", ("milch", "molkerei", "joghurt", "quark", "kaese", "kase", "käsescheiben", "kaesescheiben", "gouda", "emmentaler", "mozzarella", "camembert", "butter", "sahne", "rahm", "eier", "frischkaese")),
+        ("Lebensmittel > Fleisch, Wurst & Fisch", ("fleisch", "wurst", "schwein", "rind", "huhn", "haehnchen", "gefluegel", "geflugel", "fisch", "lachs", "garnelen", "bacon", "salami", "kabanos", "wuerstchen", "wurstchen", "schinken", "speck", "meeresfruechte", "meeresfrüchte", "kabeljau", "thunfisch", "hering")),
+        ("Lebensmittel > Brot & Backwaren", ("brot", "broet", "brotchen", "back", "croissant", "toast", "baguette", "kuchen", "broetchen", "zopf", "schnecke", "teig", "pizzateig", "waffel")),
         ("Lebensmittel > Konserven & Haltbares", ("konserve", "dose", "eingemacht", "haltbar", "vorrat", "glas", "polpa", "passiert", "konfituere", "marmelade", "honig")),
         ("Lebensmittel > Gewürze, Öle & Saucen", ("gewuerz", "gewurz", "wuerze", "wurzpaste", "fix", "sauce", "pesto", "oel", "ol", "olivenoel", "rapsoel", "essig")),
-        ("Lebensmittel > Grundnahrungsmittel", ("nudel", "reis", "mehl", "zucker", "haferflocken", "linsen", "bohnen", "gries", "hafer")),
-        ("Lebensmittel > Gemüse", ("gemuese", "gemuse", "salat", "zwiebel", "kartoffel", "paprika", "tomate", "tomaten", "gurke", "gurken", "broccoli", "brokkoli", "karotte", "moehre", "moehren", "erbse", "zuckererbse", "spinat", "kohl", "lauch", "zucchini", "avocado", "olive", "oliven", "spargel", "champignon", "pilz", "aubergine", "sellerie", "kuerbis", "radieschen", "knoblauch", "ingwer")),
+        ("Lebensmittel > Grundnahrungsmittel", ("nudel", "reis", "mehl", "zucker", "haferflocken", "linsen", "bohnen", "gries", "hafer", "muesli", "müsli", "cornflakes", "cerealien")),
+        ("Lebensmittel > Gemüse", ("gemuese", "gemuse", "salat", "zwiebel", "kartoffel", "paprika", "tomate", "tomaten", "gurke", "gurken", "broccoli", "brokkoli", "karotte", "moehre", "moehren", "erbse", "zuckererbse", "spinat", "kohl", "lauch", "zucchini", "avocado", "olive", "oliven", "spargel", "champignon", "pilz", "aubergine", "sellerie", "kuerbis", "radieschen", "knoblauch", "ingwer", "chicoree", "rucola", "salatmix")),
         ("Lebensmittel > Obst", ("obst", "apfel", "banane", "traube", "beere", "orange", "zitrone", "birne", "mandarine", "kiwi", "pomelo", "ananas", "mango", "pflaume", "pfirsich", "nektarine", "aprikose", "melone", "wassermelone", "kaki", "granatapfel", "grapefruit", "limette")),
     ]
     BASE_FOOD_KEYWORDS: tuple[str, ...] = (
@@ -52,13 +52,13 @@ class Scraper:
     )
     OTHER_TOP_CATEGORY_RULES: List[tuple[str, tuple[str, ...]]] = [
         ("Drogerie", ("drogerie", "hygiene", "kosmetik", "pflege", "deo", "dusch", "shampoo", "zahnpasta", "slipeinlagen", "tampon", "creme", "body", "makeup")),
-        ("Haushalt", ("haushalt", "reinigung", "reiniger", "geschirr", "spuel", "spul", "putz", "waschmittel", "kueche", "kuche", "behaelter", "behalter", "muell", "mull", "staub", "wischer", "eimer", "toilettenpapier", "taschentuecher", "taschentucher", "lufterfrischer", "duft")),
+        ("Haushalt", ("haushalt", "reinigung", "reiniger", "geschirr", "spuel", "spul", "putz", "waschmittel", "kueche", "kuche", "behaelter", "behalter", "muell", "mull", "muellbeutel", "müllbeutel", "folie", "backpapier", "staub", "wischer", "eimer", "toilettenpapier", "taschentuecher", "taschentucher", "lufterfrischer", "duft")),
         ("Tierbedarf", ("tier", "hund", "katze", "haustier", "futter")),
         ("Baby & Kind", ("baby", "kind", "windel", "nuckel", "kinder")),
         ("Gesundheit", ("gesundheit", "medizin", "apotheke", "vitamin", "pflaster")),
-        ("Baumarkt & Garten", ("baumarkt", "garten", "bohr", "werkzeug", "schraub", "saege", "sage", "rasen", "pflanze", "duenger", "dunger")),
-        ("Elektronik", ("elektronik", "akku", "batterie", "roboter", "multimeter", "led", "tv", "smartphone", "computer")),
-        ("Mode", ("mode", "socken", "hoodie", "jacke", "shirt", "hose", "schuh")),
+        ("Baumarkt & Garten", ("baumarkt", "garten", "bohr", "werkzeug", "schraub", "saege", "sage", "rasen", "pflanze", "duenger", "dunger", "blume", "strauss", "orchidee", "haworthia")),
+        ("Elektronik", ("elektronik", "akku", "batterie", "roboter", "multimeter", "led", "tv", "smartphone", "computer", "mixer", "laser", "soundbar", "telefon", "audio", "kabel")),
+        ("Mode", ("mode", "socken", "hoodie", "jacke", "shirt", "hose", "schuh", "arbeitshose", "unterwaesche", "unterwäsche", "sweathose")),
         ("Wohnen", ("wohnen", "sofa", "moebel", "mobel", "bett", "lampe", "stuhl")),
         ("Freizeit & Sport", ("sport", "fitness", "outdoor", "wandern", "freizeit", "fahrrad")),
     ]
